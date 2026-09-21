@@ -1,0 +1,2039 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<!-- キーボードが出たらページの枠ごと縮める（下に浮かせてあるボタンが隠れないようにするため） -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="app-version" content="65">
+<meta name="theme-color" content="#1b1a18">
+<link rel="manifest" href="./manifest.json">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<title>PEG CLIP</title>
+
+<!--
+  ========================================
+  PEGクリップ  セクション索引
+  ========================================
+  #SEC_ICONS      アイコンの元データ（画面の先頭に隠してある）
+  #SEC_CSS_BASE    色トークン・土台のスタイル
+  #SEC_CSS_HEAD    ヘッダーとツールバー
+  #SEC_CSS_PASTE   貼り付け枠の見た目
+  #SEC_CSS_CARD    カード一覧の見た目
+  #SEC_CSS_SEARCH  検索モーダルの見た目
+  #SEC_CSS_TOAST   お知らせ（画面の下に出る帯）
+  #SEC_CSS_ASK     終了の確認（戻るボタンを押したときに出る）
+  #SEC_CSS_VIEW    画像のプレビュー（サムネイルをタップしたときの全画面表示）
+  #SEC_HTML        画面の構造
+  #SEC_JS_DB       IndexedDB（開く・保存・読む・消す）
+  #SEC_JS_STATE    メモリ上のカード配列と再描画
+  #SEC_JS_ADD      カードを足す（テキスト／画像／メモ）
+  #SEC_JS_CLIP     クリップボードの読み取り・書き込み
+  #SEC_JS_PASTE    貼り付け枠（権限が要らない入り口）
+  #SEC_JS_PICK     画像を選んで入れる（共有が使えないときの入り口）
+  #SEC_JS_VIEW     画像のプレビューの開閉
+  #SEC_JS_SEARCH   検索（モーダル・履歴・ヒット判定）
+  #SEC_JS_UTIL     URL判定・画像縮小・日付・トースト
+  #SEC_JS_INBOX    共有メニューから届いたものを取り込む
+  #SEC_JS_BACK     戻るボタンの受け止め
+  #SEC_JS_INIT     起動処理とイベント登録
+  ========================================
+-->
+
+<style>
+/* #SEC_CSS_BASE ------------------------------------ */
+:root{
+  --bg:#1b1a18;
+  --panel:#212121;
+  --line:#383838;
+  --text:#ece7df;
+  --dim:#9a938a;
+  --tag:#e0a84e;
+  --danger:#c96a5c;
+  --radius:14px;
+}
+*{box-sizing:border-box;}
+/* タップした瞬間にChromeが出す青い四角を、画面のどこでも出さない */
+html{-webkit-tap-highlight-color:transparent;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:"Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
+  font-size:15px;
+  line-height:1.7;
+  -webkit-text-size-adjust:100%;
+  padding-bottom:40px;
+}
+button{
+  font-family:inherit;
+  font-size:14px;
+  color:var(--text);
+  background:transparent;
+  border:1px solid var(--line);
+  border-radius:10px;
+  padding:9px 14px;
+  cursor:pointer;
+}
+button:active{background:#2e2e2e;}
+button:focus-visible{outline:2px solid var(--tag);outline-offset:2px;}
+textarea,input[type="text"]{
+  font-family:inherit;
+  font-size:15px;
+  color:var(--text);
+  background:#1b1a18;
+  border:1px solid var(--line);
+  border-radius:10px;
+  padding:10px 12px;
+  width:100%;
+}
+textarea:focus,input:focus{outline:1px solid var(--tag);outline-offset:0;border-color:transparent;}
+
+/* #SEC_CSS_HEAD ------------------------------------ */
+header{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:10px 16px;
+  border-bottom:1px solid var(--line);
+  background:var(--bg);
+}
+header h1{
+  flex:1 1 auto;
+  margin:0;
+  font-family:ui-monospace,Menlo,Consolas,monospace;
+  font-size:19px;
+  font-weight:500;
+  letter-spacing:.14em;
+  line-height:1.2;
+}
+/* ヘッダー右端の検索ボタン。クリップボード／画像の2列はそのままにしたいので、こちらに置いてある。
+   枠線は持たせず、虫めがねだけを見せる。丸みは押したときの色が丸く出るために残してある */
+.headbtn{
+  flex:0 0 auto;
+  width:40px;height:40px;padding:0;
+  display:flex;align-items:center;justify-content:center;
+  background:transparent;
+  border:0;
+  border-radius:50%;
+  color:var(--tag);
+}
+.headbtn .ic{width:25px;height:25px;}
+
+.toolbar{
+  display:grid;grid-template-columns:repeat(2,1fr);gap:8px;
+  padding:18px 16px;
+}
+.toolbar button{
+  display:flex;flex-direction:column;align-items:center;gap:5px;
+  padding:10px 4px 9px;
+  font-size:12px;
+  line-height:1.3;
+}
+.toolbar button .ic{color:var(--tag);}
+
+/* アイコンの共通の大きさ。色は置かれた場所の文字色を引き継ぐ */
+.ic{
+  width:22px;height:22px;flex:none;
+  display:block;
+  fill:none;
+  stroke:currentColor;
+  stroke-width:1.5;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+
+/* #SEC_CSS_PASTE ----------------------------------- */
+.pastearea{padding:0 16px;}
+/* クリップボタンと、クリップ済みカード一覧の区切り線。左右はカードと同じ位置で止める */
+.sep{height:1px;background:var(--line);margin:18px 16px;}
+.boxwrap{position:relative;}
+#pasteBox{
+  min-height:76px;max-height:200px;overflow:auto;
+  background:var(--panel);
+  border:1px dashed var(--line);
+  border-radius:var(--radius);
+  padding:12px 44px 12px 14px;
+  font-size:14px;
+  word-break:break-word;
+  -webkit-user-select:text;user-select:text;
+}
+#pasteBox:focus{outline:1px solid var(--tag);border-color:transparent;}
+#pasteBox.is-empty::before{
+  content:attr(data-ph);
+  color:var(--dim);
+  font-size:13px;
+  line-height:1.6;
+}
+#pasteBox img{max-width:100%;max-height:150px;border-radius:6px;}
+/* 枠を空にする✕。枠に重ねてあるので、枠の高さは狭くならない。縦は枠の中央に置く */
+.boxclear{
+  position:absolute;top:50%;right:7px;transform:translateY(-50%);
+  width:30px;height:30px;padding:0;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:50%;
+  color:var(--dim);
+}
+.boxclear .ic{width:16px;height:16px;}
+/* 枠が空のあいだは✕を出さない。空かどうかはJSが is-empty を付け外しして決める */
+#pasteBox.is-empty + .boxclear{display:none;}
+
+/* 枠とクリップボタンの間隔。ここを広げると枠から離れて見える */
+.pastearea .row{display:flex;gap:8px;margin-top:18px;}
+.pastearea .row button{flex:1;display:flex;align-items:center;justify-content:center;gap:7px;}
+.pastearea .row .take{background:var(--tag);border-color:var(--tag);color:#211d16;font-weight:600;}
+
+/* #SEC_CSS_CARD ------------------------------------ */
+#list{padding:0 16px;display:flex;flex-direction:column;gap:12px;}
+.card{
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  overflow:hidden;
+}
+/* 説明バー。左端にカテゴリタグ、その右に説明の文字が並ぶ */
+.purposerow{
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  padding:10px 14px 9px;
+  background:#2b2b2b;
+}
+/* カテゴリタグ。カードの種類から自動で決まる。タップで絞り込む予定 */
+.cattag{
+  flex:0 0 auto;
+  padding:2px 9px;
+  font-size:11px;
+  line-height:1.5;
+  color:var(--tag);
+  background:transparent;
+  border:1px solid #6b5228;
+  border-radius:999px;
+}
+/* 説明の文字。押せる場所ではないので、ボタン向けの打ち消しは持たせていない */
+.purpose{
+  flex:1 1 auto;
+  min-width:0;
+  font-size:13px;
+  color:var(--tag);
+  word-break:break-word;
+}
+
+/* 絞り込み中だけ出る帯。タグを押すと現れ、✕かもう一度同じタグを押すと消える */
+#filterBar{
+  display:none;
+  align-items:center;
+  gap:10px;
+  padding:9px 16px;
+  margin:0 0 12px;
+  background:#2b2b2b;
+}
+#filterBar.on{display:flex;}
+#filterBar .filtertext{flex:1 1 auto;font-size:12px;color:var(--dim);}
+#filterClear{
+  flex:0 0 auto;
+  display:flex;align-items:center;justify-content:center;
+  padding:6px;
+  border:0;border-radius:8px;
+  background:transparent;
+  color:var(--dim);
+}
+#filterClear .ic{width:18px;height:18px;stroke-width:1.3;}
+
+/* 編集中のカード。カード自体の色はふつうのカードと同じまま。
+   まわりを暗く覆うことで、相対的に浮かび上がって見える形にしてある。
+   z-index は覆い(#veil)より1つ大きい数字。これで覆いの手前に出る */
+.card.editing{
+  position:relative;
+  z-index:27;
+}
+/* 編集中カード以外を覆う黒。画面全体に広げてあり、ヘッダーや右下の↑も暗くなる。
+   数字は下の並び順を壊さない位置に置いてある（↑ボタン25 → 覆い26 → 編集中カード27 → ⋯メニュー28） */
+#veil{
+  position:fixed;inset:0;
+  z-index:26;
+  background:rgba(0,0,0,.70);
+  display:none;
+}
+#veil.on{display:block;}
+
+/* カードの中での編集 */
+/* 説明の入力欄を置く帯。通常カードの理由行と同じ背景にして、見た目を揃えている */
+.editbar{
+  display:flex;align-items:center;gap:10px;
+  padding:9px 14px;
+  background:#2b2b2b;
+}
+.editbar input[type="text"]{
+  flex:1 1 auto;min-width:0;
+  margin:0;
+  padding:5px 10px;
+  font-size:13px;
+  color:var(--tag);                  /* 説明の文字色も通常カードに合わせる */
+  background:#242424;
+  border:1px solid #3f3f3f;
+  border-radius:8px;
+}
+/* 下の余白は0。中の入力欄が持つ12pxだけが残り、通常カードの本文と日付の間隔と揃う */
+.edit-area{padding:12px 14px 0;}
+.edit-area textarea,
+.edit-area input[type="text"]{margin-bottom:12px;}
+.edit-area textarea{resize:vertical;font-size:14px;line-height:1.6;}
+.edit-area img{display:block;max-width:100%;max-height:160px;border-radius:8px;margin-bottom:12px;}
+.actions .ok{background:var(--tag);border-color:var(--tag);color:#211d16;font-weight:600;margin-left:auto;min-width:88px;}
+.actions .cancel{min-width:88px;}
+/* 共有メニューから受け取ったページタイトル。無いカードには出ない */
+.cardtitle{
+  padding:11px 14px 0;
+  font-size:13px;
+  line-height:1.45;
+  color:var(--text);
+  display:-webkit-box;
+  -webkit-box-orient:vertical;
+  -webkit-line-clamp:2;
+  overflow:hidden;
+  word-break:break-word;
+}
+.cardtitle + .body{padding-top:6px;}
+.body{padding:12px 14px;}
+.body pre{
+  margin:0;
+  font-family:ui-monospace,Menlo,Consolas,monospace;
+  font-size:13px;
+  line-height:1.6;
+  white-space:pre-wrap;
+  word-break:break-word;
+  max-height:8.5em;
+  overflow:hidden;
+  color:var(--text);
+}
+.body pre.open{max-height:none;}
+.body img{
+  display:block;
+  max-width:100%;
+  max-height:220px;
+  border-radius:8px;
+  background:#000;
+}
+.meta{
+  padding:0 14px 8px;
+  font-size:11px;
+  color:var(--dim);
+}
+.actions{
+  display:flex;gap:8px;
+  padding:0 14px 12px;
+}
+.actions button{padding:7px 12px;font-size:13px;}
+/* 絵だけのボタン（コピー・編集・開く）。絵を中央に置く。
+   線は入口の3つより細くする（小さく何度も出るので、細いほうが落ち着く） */
+.actions .iconbtn{display:flex;align-items:center;justify-content:center;}
+.actions .iconbtn .ic{width:20px;height:20px;stroke-width:1.3;}
+.actions .more{margin-left:auto;min-width:46px;font-size:16px;line-height:1;color:var(--dim);}
+/* 「開く」は右へ寄せて「⋯」の隣に置く。編集ボタンと押し間違えないようにするため。
+   「開く」があるカードでは、右へ寄せる役目がこちらに移るので「⋯」の寄せは外す */
+.actions .open{margin-left:auto;}
+.actions .open + .more{margin-left:0;}
+
+/* カードの「⋯」ボタンで出るメニュー */
+#menuBackdrop{position:fixed;inset:0;display:none;z-index:28;background:rgba(0,0,0,.3);}
+#menuBackdrop.on{display:block;}
+#cardMenu{
+  --menu-bg:#323232;                 /* カードより一段明るい色 */
+  --menu-line:#4a4a4a;
+  position:fixed;display:none;z-index:29;
+  background:var(--menu-bg);
+  border:1px solid var(--menu-line);
+  border-radius:12px;
+  box-shadow:0 8px 24px rgba(0,0,0,.6);
+  padding:6px;min-width:120px;
+}
+#cardMenu.on{display:block;}
+/* 「⋯」ボタンの真下（または真上）に出す吹き出しの三角。枠線用と中身用を重ねている */
+#cardMenu::before,
+#cardMenu::after{
+  content:"";position:absolute;
+  left:var(--arrow-x,50%);
+  width:0;height:0;
+  border-left:9px solid transparent;
+  border-right:9px solid transparent;
+}
+#cardMenu::after{border-left-width:8px;border-right-width:8px;}
+#cardMenu.below::before{top:-9px;margin-left:-9px;border-bottom:9px solid var(--menu-line);}
+#cardMenu.below::after{ top:-8px;margin-left:-8px;border-bottom:8px solid var(--menu-bg);}
+#cardMenu.above::before{bottom:-9px;margin-left:-9px;border-top:9px solid var(--menu-line);}
+#cardMenu.above::after{ bottom:-8px;margin-left:-8px;border-top:8px solid var(--menu-bg);}
+#cardMenu button{
+  display:block;width:100%;text-align:left;
+  border:0;border-radius:8px;background:transparent;
+  padding:13px 14px;font-size:14px;
+}
+#cardMenu button.del{color:var(--danger);}
+#editSpacer{height:0;}
+.empty-state{
+  padding:60px 24px;
+  text-align:center;
+  color:var(--dim);
+  font-size:14px;
+}
+
+/* #SEC_CSS_VIEW ------------------------------------ */
+/* サムネイルをタップすると出る全画面の画像表示。拡大はブラウザのピンチ操作に任せる */
+.viewer{
+  position:fixed;inset:0;z-index:30;
+  background:rgba(0,0,0,.92);
+  display:none;
+  align-items:center;justify-content:center;
+  padding:16px;
+}
+.viewer.on{display:flex;}
+.viewer img{
+  max-width:100%;max-height:100%;
+  object-fit:contain;
+  border-radius:4px;
+}
+.viewer-close{
+  position:absolute;
+  top:calc(10px + env(safe-area-inset-top));right:10px;
+  width:38px;height:38px;padding:0;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:50%;
+  color:var(--text);
+}
+.viewer-close .ic{width:18px;height:18px;}
+
+/* 検索モードの専用ヘッダー。画面の一番上に貼り付けておく。
+   一覧をどれだけスクロールしても↑↓が届くように、ここだけは固定にしてある。
+   z-index は「トップへ戻る」ボタン(25)のすぐ下。カードより手前、メニューより後ろになる */
+#searchNav{
+  position:fixed;top:0;left:0;right:0;z-index:24;
+  display:none;
+  align-items:center;gap:4px;
+  padding:8px 8px;
+  padding-top:calc(8px + env(safe-area-inset-top));
+  background:#2b2b2b;
+  border-bottom:1px solid var(--line);
+}
+#searchNav.on{display:flex;}
+/* 左右を同じ幅にして、その間に件数を置く。こうすると件数がヘッダーのちょうど中央に来る */
+.sn-side{flex:1 1 0;min-width:0;display:flex;align-items:center;}
+.sn-side.right{justify-content:flex-end;}
+/* いま探している語句。タップすると検索モーダルが開いて、別の語句で探し直せる */
+.sn-q{
+  flex:1 1 auto;min-width:0;
+  padding:6px 6px;
+  border:0;background:transparent;
+  color:var(--tag);font-size:13px;text-align:left;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+/* 「3/20」。数字の幅を揃えて、送るたびに左右へ動かないようにしている */
+.sn-cnt{
+  flex:0 0 auto;
+  padding:0 6px;
+  font-size:12px;color:var(--dim);
+  font-variant-numeric:tabular-nums;
+  white-space:nowrap;
+}
+.sn-btn{
+  flex:0 0 auto;
+  width:36px;height:36px;padding:0;
+  display:flex;align-items:center;justify-content:center;
+  border:0;border-radius:50%;
+  background:transparent;color:var(--text);
+  font-size:18px;line-height:1;
+}
+.sn-btn .ic{width:17px;height:17px;}
+/* いま見ている1枚。枠の色を変え、外側にもう1本重ねて太く見せている */
+.card.hit{
+  border-color:var(--tag);
+  box-shadow:0 0 0 1px var(--tag);
+}
+/* 検索語句と一致した文字。印は全部のカードに付けてあるが、色を出すのは
+   いま見ている1枚だけ。余白と角の丸みは色の有無にかかわらず持たせてあるので、
+   送っても文字の位置がずれない。
+   ブラウザが標準で付ける黄色い背景と黒文字は、ここで打ち消している */
+.card mark{
+  background:transparent;
+  color:inherit;
+  border-radius:3px;
+  padding:0 1px;
+}
+.card.hit mark{
+  background:var(--tag);
+  color:#211d16;
+}
+
+/* #SEC_CSS_SEARCH ---------------------------------- */
+/* 検索モーダル。PEGエディタの検索と同じ組み立てで、色と角の丸みだけこのアプリに合わせてある。
+   z-index は終了の確認(35)より上。両方が同時に出ることはないが、重なっても隠れないようにしておく */
+#searchModal{
+  position:fixed;inset:0;z-index:36;
+  display:none;
+  align-items:flex-start;justify-content:center;
+  /* 上の余白は px で固定してある。vh（画面の高さの割合）にすると、
+     キーボードが引っ込んだ瞬間に画面が高くなり、その分モーダルが下へ動いてしまうため */
+  padding:120px 16px 16px;
+  overflow:auto;
+  background:rgba(0,0,0,.55);
+}
+#searchModal.on{display:flex;}
+.smdlg{
+  width:100%;max-width:400px;
+  background:#323232;
+  border:1px solid #4a4a4a;
+  border-radius:var(--radius);
+  box-shadow:0 8px 28px rgba(0,0,0,.5);
+  padding:18px 16px 14px;
+}
+.smttl{font-size:14px;margin-bottom:12px;}
+.sminrow{display:flex;align-items:center;gap:8px;margin-bottom:12px;}
+/* 土台のスタイルは input[type="text"] にしか当たらないので、ここで一式書いている */
+#smIn{
+  flex:1 1 auto;min-width:0;
+  font-family:inherit;font-size:15px;
+  color:var(--text);
+  background:#242424;
+  border:1px solid #3f3f3f;
+  border-radius:10px;
+  padding:9px 12px;
+}
+#smIn:focus{outline:1px solid var(--tag);border-color:transparent;}
+/* ブラウザが勝手に付ける✕は消す（自前の✕と二重になるため） */
+#smIn::-webkit-search-cancel-button,
+#smIn::-webkit-search-decoration{display:none;}
+/* 入力欄を一度で空にする✕ */
+.smclear{
+  flex:0 0 auto;
+  width:34px;height:34px;padding:0;
+  display:flex;align-items:center;justify-content:center;
+  background:transparent;
+  border:1px solid #4a4a4a;
+  border-radius:50%;
+  color:var(--dim);
+}
+.smclear .ic{width:15px;height:15px;}
+.smhttl{font-size:11px;color:var(--dim);margin-bottom:7px;}
+/* 削除ポップアップを「チップの並びからの相対位置」で置くための土台。
+   これで、モーダルごと動いたときもポップアップが一緒に付いてくる */
+.smhist{display:flex;flex-wrap:wrap;gap:6px;position:relative;}
+/* 履歴チップ。タップで入力欄に入れるだけ（すぐには検索しない）。長押しで削除 */
+.smhitem{
+  padding:5px 12px;
+  font-size:12px;
+  color:var(--text);
+  background:#242424;
+  border:1px solid #4a4a4a;
+  border-radius:999px;
+  -webkit-user-select:none;user-select:none;
+  -webkit-touch-callout:none;
+}
+.smhitem:active{border-color:var(--tag);}
+.smbtns{display:flex;gap:8px;margin-top:16px;}
+.smbtns button{flex:1;padding:11px;}
+.smbtns .smgo{background:var(--tag);border-color:var(--tag);color:#211d16;font-weight:600;}
+/* 履歴チップを長押ししたときに出る小さな削除ボタン。
+   画面ではなくチップの並びを基準に置くので、モーダルが動いても離れない */
+.smhpopup{
+  position:absolute;z-index:37;
+  background:#3a3a3a;
+  border:1px solid #4a4a4a;
+  border-radius:10px;
+  box-shadow:0 4px 14px rgba(0,0,0,.5);
+  overflow:hidden;
+}
+.smhpopup button{
+  display:block;
+  border:0;border-radius:0;
+  background:transparent;
+  color:var(--danger);
+  padding:10px 18px;font-size:13px;
+}
+
+/* #SEC_CSS_TOAST ----------------------------------- */
+#toast{
+  position:fixed;left:50%;bottom:28px;
+  transform:translateX(-50%) translateY(10px);
+  background:#363636;border:1px solid var(--line);
+  color:var(--text);
+  padding:10px 18px;border-radius:999px;
+  font-size:13px;
+  opacity:0;pointer-events:none;
+  transition:opacity .18s,transform .18s;
+  z-index:30;
+}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0);}
+@media (prefers-reduced-motion:reduce){#toast{transition:none;}}
+
+/* #SEC_CSS_ASK ------------------------------------- */
+/* 戻るボタンを押したときに出る確認。カードの「⋯」メニューと同じ系統の見た目にそろえる */
+#exitAsk{
+  position:fixed;inset:0;z-index:35;
+  display:none;
+  align-items:center;justify-content:center;
+  padding:24px;
+  background:rgba(0,0,0,.5);
+}
+#exitAsk.on{display:flex;}
+#exitAsk .ask-box{
+  width:100%;max-width:320px;
+  background:#323232;
+  border:1px solid #4a4a4a;
+  border-radius:var(--radius);
+  box-shadow:0 8px 28px rgba(0,0,0,.5);
+}
+#exitAsk .ask-text{
+  margin:0;
+  padding:20px 18px 16px;
+  font-size:14px;
+  text-align:center;
+}
+#exitAsk .actions{padding:0 14px 14px;}
+
+/* 右下の「トップへ戻る」ボタン。ふだんは出しっぱなし。入力中とお知らせが出ている間だけ隠す */
+#toTop{
+  position:fixed;right:16px;bottom:24px;
+  width:60px;height:60px;padding:0;
+  border-radius:50%;
+  background:var(--tag);
+  border:1px solid var(--tag);
+  color:#211d16;
+  font-size:26px;font-weight:600;line-height:1;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 2px 12px rgba(0,0,0,.45);
+  opacity:1;pointer-events:auto;
+  transition:opacity .18s;
+  z-index:25;
+}
+#toTop:active{background:#cf9a45;}
+#toTop.quiet,#toTop.typing,#toTop.menuopen{opacity:0;pointer-events:none;}
+@media (prefers-reduced-motion:reduce){#toTop{transition:none;}}
+</style>
+</head>
+<body>
+
+<!-- #SEC_ICONS --------------------------------------- -->
+<!-- アイコンの絵柄はここに一度だけ書いておき、各ボタンからは <use> で呼び出す -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="ic-clipboard" viewBox="0 0 24 24">
+    <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
+    <rect x="9" y="3" width="6" height="4" rx="1.5"/>
+  </symbol>
+  <symbol id="ic-photo" viewBox="0 0 24 24">
+    <rect x="3" y="5" width="18" height="14" rx="2"/>
+    <circle cx="8.5" cy="9.5" r="1.4"/>
+    <path d="M4.5 17.5l4-4a2 2 0 0 1 2.8 0l3.2 3.2"/>
+    <path d="M14 15l1.6-1.6a2 2 0 0 1 2.8 0L20 15"/>
+  </symbol>
+  <symbol id="ic-pencil" viewBox="0 0 24 24">
+    <path d="M4 20v-4L16 4l4 4L8 20H4z"/>
+    <path d="M14 6l4 4"/>
+  </symbol>
+  <symbol id="ic-in" viewBox="0 0 24 24">
+    <path d="M12 3v10"/>
+    <path d="M8 10l4 4 4-4"/>
+    <path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>
+  </symbol>
+  <symbol id="ic-x" viewBox="0 0 24 24">
+    <path d="M6 6l12 12"/>
+    <path d="M18 6L6 18"/>
+  </symbol>
+  <symbol id="ic-search" viewBox="0 0 24 24">
+    <circle cx="11" cy="11" r="6.5"/>
+    <path d="M15.8 15.8L20 20"/>
+  </symbol>
+  <symbol id="ic-copy" viewBox="0 0 24 24">
+    <rect x="9" y="9" width="11" height="11" rx="2"/>
+    <path d="M6 15H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v1"/>
+  </symbol>
+  <symbol id="ic-open" viewBox="0 0 24 24">
+    <path d="M14 4h6v6"/>
+    <path d="M20 4l-8 8"/>
+    <path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>
+  </symbol>
+</svg>
+
+<!-- #SEC_HTML ---------------------------------------- -->
+<header>
+  <h1>PEG CLIP</h1>
+  <button type="button" id="btnSearch" class="headbtn" aria-label="検索"><svg class="ic"><use href="#ic-search"></use></svg></button>
+</header>
+
+<div class="toolbar">
+  <button id="btnPaste"><svg class="ic"><use href="#ic-clipboard"></use></svg>クリップボード</button>
+  <button id="btnPick"><svg class="ic"><use href="#ic-photo"></use></svg>画像</button>
+  <input type="file" id="filePick" accept="image/*" multiple hidden>
+</div>
+
+<div class="pastearea">
+  <div class="boxwrap">
+    <div id="pasteBox" contenteditable="true" data-ph="長押しして貼り付け"></div>
+    <button id="btnClearBox" class="boxclear" aria-label="枠を空にする"><svg class="ic"><use href="#ic-x"></use></svg></button>
+  </div>
+  <div class="row">
+    <button id="btnTake" class="take"><svg class="ic"><use href="#ic-in"></use></svg>クリップ</button>
+  </div>
+</div>
+
+<!-- 画像のプレビュー。サムネイルをタップすると出る -->
+<div id="viewer" class="viewer">
+  <button id="viewerClose" class="viewer-close" aria-label="閉じる"><svg class="ic"><use href="#ic-x"></use></svg></button>
+  <img id="viewerImg" alt="拡大した画像">
+</div>
+
+<div class="sep"></div>
+<!-- 絞り込み中だけ出る帯。ふだんは隠れている -->
+<div id="filterBar">
+  <span class="cattag" id="filterTag"></span>
+  <span class="filtertext">だけを表示中</span>
+  <button type="button" id="filterClear" aria-label="絞り込みを解除"><svg class="ic"><use href="#ic-x"></use></svg></button>
+</div>
+<div id="list"></div>
+<!-- 編集中だけ高さが入る。下のカードでも画面の上まで持ち上げられるようにするための余白 -->
+<div id="editSpacer"></div>
+
+<!-- 編集中だけ出る、画面全体を暗くする覆い。編集中のカードだけがこの手前に出る -->
+<div id="veil"></div>
+
+<div id="menuBackdrop"></div>
+<div id="cardMenu">
+  <button type="button" class="del" id="menuDelete">削除</button>
+</div>
+
+<!-- 検索モード中だけ画面の一番上に出る専用ヘッダー -->
+<div id="searchNav">
+  <div class="sn-side">
+    <button type="button" id="snQuery" class="sn-q"></button>
+  </div>
+  <span class="sn-cnt" id="snCount"></span>
+  <div class="sn-side right">
+    <button type="button" id="snPrev" class="sn-btn" aria-label="前のヒットへ">↑</button>
+    <button type="button" id="snNext" class="sn-btn" aria-label="次のヒットへ">↓</button>
+    <button type="button" id="snClose" class="sn-btn" aria-label="検索をやめる"><svg class="ic"><use href="#ic-x"></use></svg></button>
+  </div>
+</div>
+
+<!-- 検索モーダル。検索ボタンを押したときだけ出る -->
+<div id="searchModal">
+  <div class="smdlg" role="dialog" aria-modal="true" aria-label="検索">
+    <div class="smttl">検索</div>
+    <div class="sminrow">
+      <input type="search" id="smIn" placeholder="検索語句を入力..." autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false">
+      <button type="button" id="smClear" class="smclear" aria-label="入力を消す"><svg class="ic"><use href="#ic-x"></use></svg></button>
+    </div>
+    <div id="smHistWrap" hidden>
+      <div class="smhttl">履歴（長押しで削除）</div>
+      <div class="smhist" id="smHist"></div>
+    </div>
+    <div class="smbtns">
+      <button type="button" id="smCancel">キャンセル</button>
+      <button type="button" id="smGo" class="smgo">検索</button>
+    </div>
+  </div>
+</div>
+
+<!-- 戻るボタンを押したときに出る確認。ふだんは隠れている -->
+<div id="exitAsk">
+  <div class="ask-box" role="dialog" aria-modal="true" aria-label="アプリを閉じますか">
+    <p class="ask-text">アプリを閉じますか？</p>
+    <div class="actions">
+      <button type="button" class="cancel" id="exitCancel">キャンセル</button>
+      <button type="button" class="ok" id="exitClose">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<button id="toTop" type="button" aria-label="一番上へ戻る">↑</button>
+
+<div id="toast"></div>
+
+<script>
+/* #SEC_JS_DB --------------------------------------- */
+const DB_NAME = 'pegclip';
+const DB_VER  = 2;   // 2で inbox（共有の受け取り箱）を追加
+const STORE   = 'cards';
+const INBOX   = 'inbox';
+let db = null;
+
+function openDB(){
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VER);
+    req.onupgradeneeded = e => {
+      const d = e.target.result;
+      if(!d.objectStoreNames.contains(STORE)){
+        const store = d.createObjectStore(STORE, { keyPath:'id' });
+        store.createIndex('createdAt', 'createdAt');
+      }
+      if(!d.objectStoreNames.contains(INBOX)){
+        d.createObjectStore(INBOX, { keyPath:'id' });
+      }
+    };
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+
+function dbPut(card){
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).put(card);
+    tx.oncomplete = () => resolve();
+    tx.onerror    = e => reject(e.target.error);
+  });
+}
+
+function dbGetAll(){
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readonly');
+    const req = tx.objectStore(STORE).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+
+function dbDelete(id){
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror    = e => reject(e.target.error);
+  });
+}
+
+/* #SEC_JS_STATE ------------------------------------ */
+let cards = [];                 // 画像Blobも含めてメモリに保持する（コピー時に待たせないため）
+const listEl = document.getElementById('list');
+let filterCat = null;           // 絞り込み中のカテゴリ名。null なら全部出す
+
+async function reload(){
+  cards = await dbGetAll();
+  cards.sort((a,b) => b.createdAt - a.createdAt);
+  render();
+}
+
+function render(){
+  const keepY = window.scrollY;   // 描き直しで一瞬ページが短くなっても位置を戻せるように覚えておく
+  // 本文を開いてあるカードを覚えておく。描き直すと閉じてしまうため
+  const opened = new Set();
+  listEl.querySelectorAll('.card').forEach(el => {
+    if(el.querySelector('.body pre.open')) opened.add(el.dataset.id);
+  });
+  listEl.innerHTML = '';
+  const shown = filterCat ? cards.filter(c => categoryOf(c) === filterCat) : cards;
+  if(shown.length === 0){
+    const p = document.createElement('div');
+    p.className = 'empty-state';
+    p.textContent = filterCat ? 'このカテゴリのカードはありません' : 'まだ何も入っていません';
+    listEl.appendChild(p);
+    return;
+  }
+  shown.forEach(card => listEl.appendChild(buildCard(card)));
+  // 開いてあった本文を開き直す
+  opened.forEach(id => {
+    const pre = listEl.querySelector('[data-id="' + CSS.escape(id) + '"] .body pre');
+    if(pre) pre.classList.add('open');
+  });
+  // 描き直すと印も消えるので、検索モード中なら付け直す
+  if(curHit >= 0 && searchHits[curHit] !== undefined){
+    const el = listEl.querySelector('[data-id="' + CSS.escape(String(searchHits[curHit])) + '"]');
+    if(el) el.classList.add('hit');
+  }
+  window.scrollTo(0, keepY);
+}
+
+// カード内のタグを押したとき。同じカテゴリをもう一度押すと解除になる
+function toggleFilter(cat){
+  // 絞り込むと隠れるカードが出るので、検索モード中なら先に抜ける
+  if(isSearchNavOpen()) closeSearchNav();
+  filterCat = (filterCat === cat) ? null : cat;
+  updateFilterBar();
+  render();
+  window.scrollTo(0, 0);        // 並びが変わるので一番上から見せる
+}
+
+function clearFilter(){
+  filterCat = null;
+  updateFilterBar();
+  render();
+  window.scrollTo(0, 0);
+}
+
+function updateFilterBar(){
+  const bar = document.getElementById('filterBar');
+  if(filterCat) document.getElementById('filterTag').textContent = filterCat;
+  bar.classList.toggle('on', !!filterCat);
+}
+
+// カード1枚だけを作り直して差し替える（一覧全体を描き直さないので画面が動かない）
+function replaceCardEl(id){
+  const card = cards.find(c => c.id === id);
+  const old  = listEl.querySelector('[data-id="' + CSS.escape(String(id)) + '"]');
+  if(!card || !old) return null;
+  const el = buildCard(card);
+  old.replaceWith(el);
+  return el;
+}
+
+let inlineEditId = null;   // カードの中で編集中のカードのid（同時に1枚だけ）
+let inlineDraft  = null;   // 書きかけの内容 { text, purpose }。画面を描き直しても消えないようにここに持つ
+
+function buildCard(card){
+  if(card.id === inlineEditId) return buildEditCard(card);
+
+  const el = document.createElement('div');
+  el.className = 'card';
+  el.dataset.id = String(card.id);
+
+  // 説明バー（左端にカテゴリタグ、その右に説明）
+  const prow = document.createElement('div');
+  prow.className = 'purposerow';
+
+  const cat = document.createElement('button');
+  cat.type = 'button';
+  cat.className = 'cattag';
+  cat.textContent = categoryOf(card);
+  cat.setAttribute('aria-label', 'カテゴリ ' + categoryOf(card) + ' で絞り込む');
+  cat.addEventListener('click', () => toggleFilter(categoryOf(card)));
+  prow.appendChild(cat);
+
+  // 説明はただの文字。編集は鉛筆ボタンからに一本化したので、ここは押せない
+  const purpose = document.createElement('div');
+  purpose.className = 'purpose';
+  setTextWithHits(purpose, card.purpose || '');
+  prow.appendChild(purpose);
+
+  el.appendChild(prow);
+
+  // ページタイトル（共有メニューから来たときだけ入っている）
+  if(card.title){
+    const ti = document.createElement('div');
+    ti.className = 'cardtitle';
+    setTextWithHits(ti, card.title);
+    el.appendChild(ti);
+  }
+
+  // 中身
+  const body = document.createElement('div');
+  body.className = 'body';
+  if(card.type === 'image'){
+    const img = document.createElement('img');
+    img.alt = '保存した画像';
+    img.src = URL.createObjectURL(card.blob);
+    img.addEventListener('click', () => openViewer(img.src));
+    body.appendChild(img);
+  } else {
+    const pre = document.createElement('pre');
+    setTextWithHits(pre, card.text);
+    pre.addEventListener('click', () => pre.classList.toggle('open'));
+    body.appendChild(pre);
+  }
+  el.appendChild(body);
+
+  // 日付など
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  const lab = labelOf(card);
+  meta.textContent = (lab ? lab + ' ・ ' : '') + formatDate(card.createdAt);
+  el.appendChild(meta);
+
+  // ボタン
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+
+  const copy = document.createElement('button');
+  copy.className = 'iconbtn';
+  copy.innerHTML = '<svg class="ic"><use href="#ic-copy"></use></svg>';
+  copy.setAttribute('aria-label', 'コピー');
+  copy.addEventListener('click', () => copyCard(card));
+  actions.appendChild(copy);
+
+  const edit = document.createElement('button');
+  edit.className = 'iconbtn';
+  edit.innerHTML = '<svg class="ic"><use href="#ic-pencil"></use></svg>';
+  edit.setAttribute('aria-label', '編集');
+  edit.addEventListener('click', () => startInlineEdit(card.id, 'text'));
+  actions.appendChild(edit);
+
+  // 「開く」はURLのときだけ。押し間違いを避けるため、編集から離して「⋯」の隣に置く
+  if(card.type === 'url'){
+    const open = document.createElement('button');
+    open.className = 'iconbtn open';
+    open.innerHTML = '<svg class="ic"><use href="#ic-open"></use></svg>';
+    open.setAttribute('aria-label', '開く');
+    open.addEventListener('click', () => window.open(card.text, '_blank', 'noopener'));
+    actions.appendChild(open);
+  }
+
+  const more = document.createElement('button');
+  more.type = 'button';
+  more.className = 'more';
+  more.textContent = '⋯';
+  more.setAttribute('aria-label', 'このカードのメニュー');
+  more.addEventListener('click', () => openCardMenu(card.id, more));
+  actions.appendChild(more);
+
+  el.appendChild(actions);
+  return el;
+}
+
+// カードの「⋯」メニュー。押したボタンのすぐ近くに浮かせる
+let menuCardId = null;
+
+function openCardMenu(id, anchor){
+  menuCardId = id;
+  const menu = document.getElementById('cardMenu');
+  document.getElementById('menuBackdrop').classList.add('on');
+  document.getElementById('toTop').classList.add('menuopen');
+  menu.classList.add('on');                    // 大きさを測るために先に表示する
+
+  const r = anchor.getBoundingClientRect();
+  const w = menu.offsetWidth, h = menu.offsetHeight;
+
+  let left = r.right - w;                      // ボタンの右端に合わせる
+  if(left < 8) left = 8;
+
+  let top = r.bottom + 9, below = true;        // ふだんはボタンの下（三角のぶん9px空ける）
+  if(top + h > window.innerHeight - 8){
+    top = r.top - h - 9;                       // 下に入らなければ上に出す
+    below = false;
+  }
+  if(top < 8){ top = 8; below = true; }
+
+  menu.style.left = left + 'px';
+  menu.style.top  = top + 'px';
+  menu.classList.toggle('below', below);
+  menu.classList.toggle('above', !below);
+
+  // 三角の位置を「⋯」ボタンの中心に合わせる（メニューの端に寄りすぎないように止める）
+  let arrowX = r.left + r.width / 2 - left;
+  arrowX = Math.max(16, Math.min(w - 16, arrowX));
+  menu.style.setProperty('--arrow-x', arrowX + 'px');
+}
+
+function closeCardMenu(){
+  menuCardId = null;
+  document.getElementById('cardMenu').classList.remove('on');
+  document.getElementById('menuBackdrop').classList.remove('on');
+  document.getElementById('toTop').classList.remove('menuopen');
+}
+
+// 編集中のカード。見た目はカードのまま、中身と理由が入力欄になる
+function buildEditCard(card){
+  const el = document.createElement('div');
+  el.className = 'card editing';
+  el.dataset.id = String(card.id);
+
+  // 説明の帯（通常カードの理由行と同じ場所・同じ背景）
+  const bar = document.createElement('div');
+  bar.className = 'editbar';
+
+  // カテゴリタグ。編集中は絞り込みに使わないので、押せない文字として置く
+  const cat = document.createElement('span');
+  cat.className = 'cattag';
+  cat.textContent = categoryOf(card);
+  bar.appendChild(cat);
+
+  const purposeEl = document.createElement('input');
+  purposeEl.type = 'text';
+  purposeEl.setAttribute('aria-label', '説明');
+  purposeEl.value = inlineDraft.purpose;
+  purposeEl.addEventListener('input', () => { inlineDraft.purpose = purposeEl.value; });
+  bar.appendChild(purposeEl);
+
+  el.appendChild(bar);
+
+  const area = document.createElement('div');
+  area.className = 'edit-area';
+
+  // 内容
+  let textEl = null;
+  if(card.type === 'image'){
+    // 画像そのものは編集できないので、見るだけ
+    const img = document.createElement('img');
+    img.alt = '保存した画像';
+    img.src = URL.createObjectURL(card.blob);
+    area.appendChild(img);
+  } else {
+    textEl = document.createElement('textarea');
+    textEl.setAttribute('aria-label', '内容');
+    textEl.value = inlineDraft.text;
+    textEl.addEventListener('input', () => { inlineDraft.text = textEl.value; });
+    const lines = inlineDraft.text.split('\n').length;
+    textEl.rows = Math.min(12, Math.max(3, lines + 1));
+    area.appendChild(textEl);
+  }
+  el.appendChild(area);
+
+  // 日付など（通常カードと同じ内容・同じ位置。日時は作成したときのもの）
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  const lab = labelOf(card);
+  meta.textContent = (lab ? lab + ' ・ ' : '') + formatDate(card.createdAt);
+  el.appendChild(meta);
+
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+
+  const cancel = document.createElement('button');
+  cancel.className = 'cancel';
+  cancel.textContent = 'キャンセル';
+  cancel.addEventListener('click', () => {
+    endInlineEdit();
+    replaceCardEl(card.id);
+  });
+  actions.appendChild(cancel);
+
+  const ok = document.createElement('button');
+  ok.className = 'ok';
+  ok.textContent = 'OK';
+  ok.addEventListener('click', async () => {
+    if(textEl){
+      const t = textEl.value.trim();
+      if(!t){ toast('内容が空です'); return; }
+      card.text = t;
+      card.type = isUrl(t) ? 'url' : 'text';   // 書き換えでURLになった／URLでなくなった場合に合わせる
+    }
+    card.purpose = purposeEl.value.trim();
+    await dbPut(card);
+    endInlineEdit();
+    await reload();
+    toast('保存しました');
+  });
+  actions.appendChild(ok);
+
+  el.appendChild(actions);
+
+  // startInlineEdit から入力欄へカーソルを移せるように覚えておく
+  el._purposeEl = purposeEl;
+  el._textEl    = textEl;
+  return el;
+}
+
+// 編集を始める。focusTo は最初に移る欄（'text' か 'purpose'）
+function startInlineEdit(id, focusTo){
+  if(inlineEditId === id) return;   // すでに編集中のカードなら何もしない
+
+  // 別のカードを編集中で、書きかけに変更があるときは確認する
+  if(inlineEditId !== null && isDraftChanged()){
+    if(!confirm('編集中の内容は保存されていません。破棄して切り替えますか。')) return;
+  }
+
+  const card = cards.find(c => c.id === id);
+  if(!card) return;
+  // 前に編集していたカードがあれば、通常の形に戻す
+  const prevId = inlineEditId;
+  inlineEditId = id;
+  inlineDraft  = { text: card.text || '', purpose: card.purpose || '' };
+  showVeil(true);
+  if(prevId !== null) replaceCardEl(prevId);
+
+  // 押したカードだけを編集の形に差し替える
+  const el = replaceCardEl(id);
+  if(!el) { render(); return; }
+
+  // カーソルを移す。preventScroll で、ブラウザによる余計なスクロールを止める
+  const target = (focusTo === 'purpose' || !el._textEl) ? el._purposeEl : el._textEl;
+  target.focus({ preventScroll: true });
+
+  scrollCardToTop(el);
+}
+
+// 編集に入ったカードを、画面の上から少し下げた位置へ持ってくる。
+// 画面の高さの何割ぶん下げるかを決める数字。0.12なら1割2分ぶん。
+// 数字を大きくするとカードが下に、小さくすると上に来る
+const EDIT_TOP_RATIO = 0.12;
+
+function scrollCardToTop(el){
+  const spacer = document.getElementById('editSpacer');
+  spacer.style.height = '0px';
+
+  // 上に空ける余白。キーボードが出る前の高さで決めているので、
+  // キーボードが出てもカードは動かない
+  const gap = Math.round(window.innerHeight * EDIT_TOP_RATIO);
+  const targetY = window.scrollY + el.getBoundingClientRect().top - gap;
+
+  // 下までスクロールしても届かないぶんは、ページの下に余白を足して届くようにする
+  const maxY = document.documentElement.scrollHeight - window.innerHeight;
+  const need = Math.ceil(targetY - maxY);
+  if(need > 0){
+    spacer.style.height = need + 'px';
+    void document.documentElement.scrollHeight;   // 足した余白を先に反映させる
+  }
+
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  window.scrollTo({ top: Math.max(0, targetY), behavior: reduce ? 'auto' : 'smooth' });
+}
+
+// 覆いの出し入れ
+function showVeil(on){
+  const veil = document.getElementById('veil');
+  if(veil) veil.classList.toggle('on', !!on);
+}
+
+// 編集をやめるときの共通の手順。書きかけに変更があるときだけ確認する。
+// 戻るボタンからも、覆いをタップしたときからも、ここを通る
+function tryEndInlineEdit(){
+  if(inlineEditId === null) return;
+  const y = window.scrollY;   // 確認を出すとキーボードが引っ込むので、先に位置を覚えておく
+  if(isDraftChanged() && !confirm('編集中の内容は保存されていません。破棄しますか。')){
+    holdScrollAt(y);          // 編集を続ける場合も、枠が広がったぶんの位置ずれを直す
+    return;
+  }
+  const id = inlineEditId;
+  endInlineEdit();
+  replaceCardEl(id);
+}
+
+function endInlineEdit(){
+  inlineEditId = null;
+  inlineDraft  = null;
+  showVeil(false);
+  // 下に足してある余白をいきなり外すとページが縮み、見ていた位置が繰り上がる。
+  // その結果、画面の上にあったカードが下へ下がって見えてしまう。
+  // 今の位置を覚えておき、カードが描き替わったあとで同じ位置へ戻す
+  const y = window.scrollY;
+  holdScrollAt(y);
+}
+
+// 位置を戻す。キーボードが引っ込んで画面の枠が広がるまでに間があるので、
+// 一度だけでは間に合わない。少し時間を空けて何度か戻し直す
+function holdScrollAt(y){
+  [0, 180, 420].forEach(ms => setTimeout(() => keepScrollAt(y), ms));
+}
+
+// 指定の位置を保てるだけの余白だけを下に残し、その位置へ戻す
+function keepScrollAt(y){
+  const spacer = document.getElementById('editSpacer');
+  if(!spacer) return;
+  spacer.style.height = '0px';
+  void document.documentElement.scrollHeight;   // 余白を外した高さで測り直す
+
+  const maxY = document.documentElement.scrollHeight - window.innerHeight;
+  const need = Math.ceil(y - maxY);
+  if(need > 0){
+    spacer.style.height = need + 'px';
+    void document.documentElement.scrollHeight;
+  }
+  window.scrollTo(0, Math.max(0, y));
+}
+
+// 残った余白は、上へスクロールして不要になった時点でそっと外す
+function trimSpacer(){
+  const spacer = document.getElementById('editSpacer');
+  if(!spacer) return;
+  const h = parseInt(spacer.style.height, 10) || 0;
+  if(h <= 0) return;
+  // 余白を外しても今の位置がずれない所まで来ていたら外す
+  if(window.scrollY <= document.documentElement.scrollHeight - h - window.innerHeight){
+    spacer.style.height = '0px';
+  }
+}
+window.addEventListener('scroll', trimSpacer, { passive:true });
+
+// 書きかけが保存済みの内容と違うかどうか
+function isDraftChanged(){
+  const card = cards.find(c => c.id === inlineEditId);
+  if(!card || !inlineDraft) return false;
+  return inlineDraft.text !== (card.text || '') || inlineDraft.purpose !== (card.purpose || '');
+}
+
+// メタ行の左側。種類の文字はカテゴリタグに移したので、URLのドメインだけを出す
+function labelOf(card){
+  if(card.type === 'url') return domainOf(card.text);
+  return '';
+}
+
+// 説明バーの左端に出すカテゴリ。カードの種類から自動で決まる
+function categoryOf(card){
+  if(card.type === 'image') return '画像';
+  if(card.type === 'url')   return 'URL';
+  return 'テキスト';
+}
+
+// URLからドメインだけを取り出す。https:// と先頭のwww.は落とす
+function domainOf(url){
+  try{
+    return new URL(url).hostname.replace(/^www\./i, '');
+  }catch(e){
+    return 'URL';
+  }
+}
+
+/* #SEC_JS_ADD -------------------------------------- */
+function newId(){
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+// 貼った瞬間に保存する。説明はあとから鉛筆ボタンを押して書く
+async function addText(text){
+  const t = text.trim();
+  if(!t){ toast('中身が空です'); return; }
+  const card = { id:newId(), type: isUrl(t) ? 'url' : 'text', text:t, purpose:'', createdAt:Date.now() };
+
+  await dbPut(card);
+  await reload();
+  toast('クリップしました');
+}
+
+async function addImage(blob){
+  const card = { id:newId(), type:'image', blob:blob, text:'', purpose:'', createdAt:Date.now() };
+  await dbPut(card);
+  await reload();
+  toast('クリップしました');
+}
+
+/* #SEC_JS_CLIP ------------------------------------- */
+async function pasteFromClipboard(){
+  if(!navigator.clipboard || !navigator.clipboard.read){
+    toast('このブラウザはクリップボードの読み取りに対応していません');
+    return;
+  }
+  try{
+    const items = await navigator.clipboard.read();
+    if(items.length === 0){ toast('クリップボードは空です'); return; }
+    const item = items[0];
+    const imageType = item.types.find(t => t.startsWith('image/'));
+    if(imageType){
+      const raw = await item.getType(imageType);
+      const shrunk = await shrinkImage(raw);
+      await addImage(shrunk);
+      return;
+    }
+    if(item.types.includes('text/plain')){
+      const blob = await item.getType('text/plain');
+      await addText(await blob.text());
+      return;
+    }
+    toast('対応していない形式でした');
+  }catch(err){
+    toast('読み取れませんでした（権限を確認してください）');
+    console.error(err);
+  }
+}
+
+async function copyCard(card){
+  try{
+    if(card.type === 'image'){
+      if(!navigator.clipboard || !window.ClipboardItem){
+        toast('このブラウザは画像のコピーに対応していません'); return;
+      }
+      await navigator.clipboard.write([ new ClipboardItem({ 'image/png': card.blob }) ]);
+    } else {
+      await navigator.clipboard.writeText(card.text);
+    }
+    // コピーできたときのお知らせは出さない。
+    // Android側が「コピーしました」を自前で出すので、このアプリでも出すと二重になるため。
+    // 元に戻したくなったら、上の2か所に toast('コピーしました') を足せばよい
+  }catch(err){
+    toast('コピーできませんでした');
+    console.error(err);
+  }
+}
+
+/* #SEC_JS_PASTE ------------------------------------ */
+// こちらは clipboard-read の権限を使わないので file:// でも動く
+const pasteBox = document.getElementById('pasteBox');
+
+// 貼り付けた時点ではカードにしない。枠の中に足していき、「クリップ」を押して初めて保存する
+pasteBox.addEventListener('paste', (e) => {
+  const dt = e.clipboardData;
+  if(!dt) return;   // 取れないときは枠にそのまま貼られるので「クリップ」で拾う
+
+  // 画像が来ているか先に見る
+  let file = null;
+  for(const item of dt.items){
+    if(item.kind === 'file' && item.type.startsWith('image/')){
+      file = item.getAsFile();
+      if(file) break;
+    }
+  }
+  if(file){
+    e.preventDefault();
+    appendImageToBox(file);
+    return;
+  }
+
+  const text = dt.getData('text/plain');
+  if(text && text.trim()){
+    e.preventDefault();
+    appendTextToBox(text);
+  }
+});
+
+// 枠の末尾に文字を足す。すでに中身があるときは改行してから足す
+function appendTextToBox(text){
+  if(pasteBox.childNodes.length){
+    pasteBox.appendChild(document.createElement('br'));
+  }
+  const lines = text.split('\n');
+  lines.forEach((line, i) => {
+    if(i) pasteBox.appendChild(document.createElement('br'));
+    pasteBox.appendChild(document.createTextNode(line));
+  });
+  afterAppend();
+}
+
+// 枠の末尾に画像を足す。実データは「クリップ」を押したときに取り出す
+function appendImageToBox(file){
+  if(pasteBox.childNodes.length){
+    pasteBox.appendChild(document.createElement('br'));
+  }
+  const img = document.createElement('img');
+  img.alt = '貼り付けた画像';
+  img.src = URL.createObjectURL(file);
+  pasteBox.appendChild(img);
+  afterAppend();
+}
+
+// 足したものが見えるように、枠の中を一番下まで送る
+function afterAppend(){
+  pasteBox.scrollTop = pasteBox.scrollHeight;
+  updateBoxEmpty();
+}
+
+// 枠が「見た目のうえで空っぽ」かどうかを見て、✕と案内文字の出し分けを合わせる。
+// ブラウザは文字を消したあとに見えない改行の印を残すことがあるので、中身の有無で判断する
+function updateBoxEmpty(){
+  const hasImage = !!pasteBox.querySelector('img');
+  const hasText  = pasteBox.innerText.replace(/\u00a0/g, ' ').trim() !== '';
+  pasteBox.classList.toggle('is-empty', !hasImage && !hasText);
+}
+
+// 貼り付けイベントが取れなかった場合の受け皿
+async function takeFromBox(){
+  const img = pasteBox.querySelector('img');
+  if(img){
+    const blob = await imgToBlob(img);
+    if(!blob){ toast('画像を取り込めませんでした'); return; }
+    const shrunk = await shrinkImage(blob);
+    clearBox();
+    await addImage(shrunk);
+    return;
+  }
+  const text = pasteBox.innerText;
+  if(text && text.trim()){
+    clearBox();
+    await addText(text);
+    return;
+  }
+  toast('枠が空です');
+}
+
+// 枠に貼られた img から実データを取り出す（fetchが通らない環境ではcanvasで写し取る）
+async function imgToBlob(img){
+  try{
+    const res = await fetch(img.src);
+    return await res.blob();
+  }catch(err){
+    try{
+      const canvas = document.createElement('canvas');
+      canvas.width  = img.naturalWidth  || img.width;
+      canvas.height = img.naturalHeight || img.height;
+      canvas.getContext('2d').drawImage(img, 0, 0);
+      return await new Promise(r => canvas.toBlob(r, 'image/png'));
+    }catch(err2){
+      console.error(err, err2);
+      return null;
+    }
+  }
+}
+
+function clearBox(){
+  // 枠に出していた画像の置き場を解放してから空にする
+  pasteBox.querySelectorAll('img').forEach(img => {
+    if(img.src.startsWith('blob:')) URL.revokeObjectURL(img.src);
+  });
+  pasteBox.innerHTML = '';
+  updateBoxEmpty();
+}
+
+/* #SEC_JS_PICK ------------------------------------- */
+// 端末の画像を選んで入れる。複数選択できる
+const filePick = document.getElementById('filePick');
+
+filePick.addEventListener('change', async () => {
+  const files = Array.from(filePick.files || []);
+  filePick.value = '';   // 同じ画像をもう一度選んでも反応するように空にしておく
+  if(files.length === 0) return;
+
+  let ok = 0, ng = 0;
+  const base = Date.now();
+  for(let i = 0; i < files.length; i++){
+    try{
+      // 開けない画像（ブラウザが対応していない形式など）は入れない
+      const bitmap = await createImageBitmap(files[i]);
+      bitmap.close();
+      const shrunk = await shrinkImage(files[i]);
+      await dbPut({ id:newId(), type:'image', blob:shrunk, text:'',
+                    purpose:'', createdAt: base + i });
+      ok++;
+    }catch(err){
+      console.error(err);
+      ng++;
+    }
+  }
+  await reload();
+  if(ng === 0)      toast(ok === 1 ? 'クリップしました' : `${ok}件クリップしました`);
+  else if(ok === 0) toast('画像を開けませんでした');
+  else              toast(`${ok}件クリップしました（${ng}件は開けませんでした）`);
+});
+
+/* #SEC_JS_VIEW ------------------------------------- */
+const viewer    = document.getElementById('viewer');
+const viewerImg = document.getElementById('viewerImg');
+
+// カードの画像と同じ置き場を使い回すだけなので、閉じるときに解放はしない
+function openViewer(src){
+  viewerImg.src = src;
+  viewer.classList.add('on');
+}
+
+function closeViewer(){
+  viewer.classList.remove('on');
+  viewerImg.removeAttribute('src');
+}
+
+/* #SEC_JS_SEARCH ----------------------------------- */
+/* PEGエディタの検索を下地にしている。違うのは探す相手で、
+   あちらは「1本の長い文字列の中の位置」、こちらは「カードの一覧のうちどの1枚か」。
+   今の段階では、見つかった枚数をお知らせに出すところまで。
+   ヒット箇所への移動（専用ヘッダーと↑↓）は次の段階で足す。 */
+
+const searchModal = document.getElementById('searchModal');
+const smIn        = document.getElementById('smIn');
+const smHist      = document.getElementById('smHist');
+const smHistWrap  = document.getElementById('smHistWrap');
+
+const SEARCH_HIST_KEY = 'pegclip.searchHist';   // 履歴の置き場（アプリを閉じても残る）
+let searchHist = [];                            // 新しいものほど後ろ。最大5件
+let searchHits = [];                            // 直前の検索で見つかったカードのid。上から並んでいる
+let curHit     = -1;                            // いま何番目のヒットを見ているか（0から数える）
+let searchQuery = '';                           // 検索モード中の語句。文字の色付けに使う（モードを抜けると空に戻る）
+
+// 文字を入れる。検索モード中は、一致した部分だけ <mark> で包んで色を付ける。
+// 文字そのものを組み立てて入れているので、記号や < > が混ざっていても壊れない
+function setTextWithHits(el, text){
+  const src = text || '';
+  if(!searchQuery){ el.textContent = src; return; }
+
+  const needle = searchQuery.toLowerCase();
+  const hay    = src.toLowerCase();
+  let from = 0, at;
+  let found = false;
+
+  while((at = hay.indexOf(needle, from)) !== -1){
+    found = true;
+    if(at > from) el.appendChild(document.createTextNode(src.slice(from, at)));
+    const m = document.createElement('mark');
+    m.textContent = src.slice(at, at + searchQuery.length);
+    el.appendChild(m);
+    from = at + searchQuery.length;
+  }
+
+  if(!found){ el.textContent = src; return; }
+  if(from < src.length) el.appendChild(document.createTextNode(src.slice(from)));
+}
+
+function loadSearchHist(){
+  try{
+    const raw = localStorage.getItem(SEARCH_HIST_KEY);
+    searchHist = raw ? (JSON.parse(raw) || []) : [];
+  }catch(err){
+    searchHist = [];
+  }
+}
+
+function saveSearchHist(){
+  try{ localStorage.setItem(SEARCH_HIST_KEY, JSON.stringify(searchHist)); }catch(err){}
+}
+
+// ---- 履歴チップを長押ししたときに出る削除ボタン ----
+let histPopup = null;
+
+function closeHistPopup(){
+  if(histPopup){
+    histPopup.remove();
+    histPopup = null;
+  }
+}
+
+function openHistPopup(chip, word){
+  closeHistPopup();
+  const pop = document.createElement('div');
+  pop.className = 'smhpopup';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = '削除';
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const i = searchHist.indexOf(word);
+    if(i !== -1) searchHist.splice(i, 1);
+    saveSearchHist();
+    closeHistPopup();
+    buildSearchHist();
+  });
+  pop.appendChild(btn);
+  // 画面（body）ではなくチップの並びの中に入れる。こうするとモーダルと一緒に動く
+  smHist.appendChild(pop);
+
+  // チップの真上に出す。高さを測ってから位置を決めるので、先に画面へ入れてある。
+  // offsetLeft / offsetTop は、土台にした .smhist の左上から見た位置
+  pop.style.left = chip.offsetLeft + 'px';
+  pop.style.top  = (chip.offsetTop - pop.offsetHeight - 6) + 'px';
+  histPopup = pop;
+}
+
+// ---- 履歴の一覧を作り直す ----
+function buildSearchHist(){
+  if(searchHist.length === 0){ smHistWrap.hidden = true; return; }
+  smHistWrap.hidden = false;
+  smHist.innerHTML = '';
+
+  // 新しいものを左に出したいので、後ろから並べる
+  for(let i = searchHist.length - 1; i >= 0; i--){
+    const word = searchHist[i];
+    const chip = document.createElement('span');
+    chip.className = 'smhitem';
+    chip.textContent = word;
+
+    // タップ → 入力欄に入れるだけ。すぐには検索しない
+    chip.addEventListener('click', () => {
+      smIn.value = word;
+      smIn.focus();
+    });
+
+    // 長押し（0.5秒）→ 削除ボタン。指が動いたり離れたら取りやめ
+    let timer = null;
+    const cancel = () => { if(timer){ clearTimeout(timer); timer = null; } };
+    chip.addEventListener('touchstart', () => {
+      timer = setTimeout(() => { timer = null; openHistPopup(chip, word); }, 500);
+    }, { passive:true });
+    chip.addEventListener('touchend', cancel);
+    chip.addEventListener('touchmove', cancel);
+    chip.addEventListener('touchcancel', cancel);
+
+    smHist.appendChild(chip);
+  }
+}
+
+function openSearchModal(){
+  closeHistPopup();
+  buildSearchHist();
+  searchModal.classList.add('on');
+  // すぐだと画面が出来上がる前に当たってしまうことがあるので、少し待ってからカーソルを入れる
+  setTimeout(() => smIn.focus(), 80);
+}
+
+function closeSearchModal(){
+  closeHistPopup();
+  searchModal.classList.remove('on');
+}
+
+// ---- カード1枚が検索語句を含んでいるか ----
+// 見るのは 説明・タイトル・本文の3つ。画像カードは本文が空なので、説明とタイトルで探すことになる
+function cardMatches(card, lowered){
+  const parts = [card.purpose || '', card.title || '', card.text || ''];
+  return parts.join('\n').toLowerCase().includes(lowered);
+}
+
+function execSearch(word){
+  const q = (word || '').trim();
+  if(!q) return;
+  closeSearchModal();
+
+  // 履歴に入れる。同じ語句は一度外してから入れ直すので、並びは「最後に使った順」になる
+  const i = searchHist.indexOf(q);
+  if(i !== -1) searchHist.splice(i, 1);
+  searchHist.push(q);
+  if(searchHist.length > 5) searchHist.shift();
+  saveSearchHist();
+
+  // カテゴリの絞り込み中だと、隠れているカードにたどり着けないので先に解除する
+  if(filterCat) clearFilter();
+
+  const lowered = q.toLowerCase();
+  searchHits = cards.filter(c => cardMatches(c, lowered)).map(c => c.id);
+
+  if(searchHits.length === 0){
+    // 送る先が1枚もないので、検索モードには入らずお知らせだけ出す
+    closeSearchNav();
+    toast('見つかりませんでした');
+    return;
+  }
+  // 語句を覚えてから描き直す。これで一致した文字に色が付く
+  searchQuery = q;
+  render();
+  openSearchNav(q);
+  gotoHit(0);
+}
+
+/* ---- 検索モード（専用ヘッダーと↑↓での移動） ---- */
+
+function isSearchNavOpen(){
+  return document.getElementById('searchNav').classList.contains('on');
+}
+
+function openSearchNav(word){
+  const nav = document.getElementById('searchNav');
+  document.getElementById('snQuery').textContent = '「' + word + '」';
+  nav.classList.add('on');
+  // 固定した帯にカードの先頭が隠れないよう、帯の高さぶんだけ上に余白を作る
+  document.body.style.paddingTop = nav.offsetHeight + 'px';
+}
+
+function closeSearchNav(){
+  const wasOn = isSearchNavOpen();
+  // 帯のぶんだけ本文を下げてあるので、その高さと今の位置を先に控えておく
+  const padTop = parseFloat(getComputedStyle(document.body).paddingTop) || 0;
+  const y = window.scrollY;
+
+  document.getElementById('searchNav').classList.remove('on');
+  document.body.style.paddingTop = '';
+  clearHitMark();
+  searchHits = [];
+  curHit = -1;
+  searchQuery = '';
+
+  if(wasOn){
+    unmarkHits();   // 一覧は作り直さず、付いていた色だけを外す
+    // 帯が消えると本文がその高さぶん上にずれるので、同じだけ位置をずらして見た目を据え置く。
+    // behavior:'auto' を指定することで、ヒット送りの滑らかな移動が途中でも即その場で止まる
+    window.scrollTo({ top: Math.max(0, y - padTop), behavior: 'auto' });
+  }
+}
+
+// 色付き文字（<mark>）だけを、文字はそのままにして外す。
+// 一覧全体を描き直さないので、スクロールの位置も画像の高さもそのまま残る
+function unmarkHits(){
+  const parents = new Set();
+  listEl.querySelectorAll('mark').forEach(m => {
+    const p = m.parentNode;
+    if(!p) return;
+    p.replaceChild(document.createTextNode(m.textContent), m);
+    parents.add(p);
+  });
+  // 切れ切れになった文字をつなぎ直しておく
+  parents.forEach(p => p.normalize());
+}
+
+// いま見ている1枚に付けた印を外す
+function clearHitMark(){
+  const prev = listEl.querySelector('.card.hit');
+  if(prev) prev.classList.remove('hit');
+}
+
+// 何番目のヒットへ移動するか。端まで行ったら反対側へ回り込む
+function gotoHit(idx){
+  // 検索したあとで消されたカードがあれば、送り先から外しておく
+  searchHits = searchHits.filter(id => cards.some(c => c.id === id));
+  if(searchHits.length === 0){
+    closeSearchNav();
+    toast('見つかったカードがなくなりました');
+    return;
+  }
+
+  curHit = (idx + searchHits.length) % searchHits.length;
+  document.getElementById('snCount').textContent = (curHit + 1) + '/' + searchHits.length;
+
+  const el = listEl.querySelector('[data-id="' + CSS.escape(String(searchHits[curHit])) + '"]');
+  clearHitMark();
+  if(!el) return;
+  el.classList.add('hit');
+  // 本文が折りたたまれていると見つかった場所が隠れてしまうので、開いておく
+  const pre = el.querySelector('.body pre');
+  if(pre) pre.classList.add('open');
+  // 画面の真ん中まで、シュッと滑らせて移動する。
+  // 動きを減らす設定の端末では、これまで通り一瞬で移動する
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  el.scrollIntoView({ block:'center', behavior: reduce ? 'auto' : 'smooth' });
+}
+
+/* #SEC_JS_UTIL ------------------------------------- */
+function isUrl(s){
+  return /^https?:\/\/\S+$/i.test(s.trim());
+}
+
+// 大きい画像はそのまま入れると容量を食うので、長辺1600pxまで縮めてPNGに揃える
+function shrinkImage(blob){
+  return new Promise(async (resolve) => {
+    try{
+      const bitmap = await createImageBitmap(blob);
+      const max = 1600;
+      let { width:w, height:h } = bitmap;
+      if(w <= max && h <= max && blob.type === 'image/png'){
+        bitmap.close();
+        resolve(blob);
+        return;
+      }
+      const scale = Math.min(1, max / Math.max(w, h));
+      w = Math.round(w * scale);
+      h = Math.round(h * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(bitmap, 0, 0, w, h);
+      bitmap.close();
+      canvas.toBlob(out => resolve(out || blob), 'image/png');
+    }catch(err){
+      console.error(err);
+      resolve(blob);
+    }
+  });
+}
+
+function formatDate(ms){
+  const d = new Date(ms);
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}/${p(d.getMonth()+1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+let toastTimer = null;
+function toast(msg){
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('on');
+  // お知らせと「トップへ戻る」ボタンが重ならないよう、出ている間だけボタンを消す
+  const fab = document.getElementById('toTop');
+  if(fab) fab.classList.add('quiet');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    el.classList.remove('on');
+    if(fab) fab.classList.remove('quiet');
+  }, 1800);
+}
+
+/* #SEC_JS_INBOX ------------------------------------ */
+// 共有メニューから送られたものは sw.js がいったん inbox に入れる。
+// アプリが開いたときにここで拾って、通常のカードに移し替える。
+function inboxGetAll(){
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(INBOX, 'readonly');
+    const req = tx.objectStore(INBOX).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+
+function inboxDelete(id){
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(INBOX, 'readwrite');
+    tx.objectStore(INBOX).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror    = e => reject(e.target.error);
+  });
+}
+
+async function drainInbox(){
+  let items = [];
+  try{ items = await inboxGetAll(); }catch(err){ console.error(err); return 0; }
+  if(items.length === 0) return 0;
+  items.sort((a,b) => a.createdAt - b.createdAt);
+
+  for(const item of items){
+    try{
+      if(item.kind === 'image'){
+        const blob = await shrinkImage(item.blob);
+        await dbPut({ id:newId(), type:'image', blob:blob, text:'',
+                      title:item.title || '', purpose:'', createdAt:item.createdAt });
+      } else {
+        const t = (item.text || '').trim();
+        if(t){
+          await dbPut({ id:newId(), type: isUrl(t) ? 'url' : 'text', text:t,
+                        title:item.title || '', purpose:'', createdAt:item.createdAt });
+        }
+      }
+    }catch(err){
+      console.error(err);
+      // 移し替えに失敗したら、理由を【診断】カードとして残す
+      try{
+        await dbPut({ id:newId(), type:'text', text:'【診断】取り込み失敗: ' + item.kind + ' / ' + (err && err.message || err),
+                      title:'', purpose:'', createdAt:Date.now() });
+      }catch(e){}
+    }
+    await inboxDelete(item.id);
+  }
+  return items.length;
+}
+
+/* #SEC_JS_BACK ------------------------------------- */
+/* 戻るボタンでアプリが終わってしまうのを止める。
+   仕掛けはひとつだけ：画面を開いた時点で、履歴に見えない一段を積んでおく。
+   戻るボタンはまずその一段を外しに行くので、アプリの外には出ない。
+   外されたことは popstate で受け取れるので、そこで一段を積み直し、
+   開いているものがあれば閉じる。何も開いていなければ終了の確認を出す。 */
+
+const exitAsk = document.getElementById('exitAsk');
+
+function pushBackGuard(){
+  history.pushState({ pegGuard:1 }, '');
+}
+
+function openExitAsk(){
+  exitAsk.classList.add('on');
+  document.getElementById('toTop').classList.add('menuopen');
+}
+
+function closeExitAsk(){
+  exitAsk.classList.remove('on');
+  document.getElementById('toTop').classList.remove('menuopen');
+}
+
+// 戻るボタンが押されたときに、上から順に見て当てはまったものだけを閉じる
+function handleBack(){
+  // 1. 終了の確認が出ている → 確認を閉じるだけ（アプリは終わらせない）
+  if(exitAsk.classList.contains('on')){ closeExitAsk(); return; }
+
+  // 2. 検索モーダル
+  if(searchModal.classList.contains('on')){ closeSearchModal(); return; }
+
+  // 3. 画像の拡大表示
+  if(viewer.classList.contains('on')){ closeViewer(); return; }
+
+  // 4. カードの「⋯」メニュー
+  if(menuCardId !== null){ closeCardMenu(); return; }
+
+  // 5. カードの編集中。書きかけに変更があるときだけ確認する
+  if(inlineEditId !== null){
+    tryEndInlineEdit();
+    return;
+  }
+
+  // 6. 検索モード中 → 検索をやめる
+  if(isSearchNavOpen()){ closeSearchNav(); return; }
+
+  // 7. 何も開いていない → 終了の確認
+  openExitAsk();
+}
+
+window.addEventListener('popstate', () => {
+  pushBackGuard();   // 外された一段を積み直す（次の戻るもここで受け取れるように）
+  handleBack();
+});
+
+// 確認の「閉じる」。Chromeが応じてくれれば閉じるが、断られることもある
+document.getElementById('exitClose').addEventListener('click', () => {
+  window.close();
+  // 閉じられなかったときは確認だけ引っ込めて、その旨を知らせる
+  setTimeout(() => {
+    if(!document.hidden){
+      closeExitAsk();
+      toast('閉じられませんでした。アプリ履歴から消してください');
+    }
+  }, 200);
+});
+
+document.getElementById('exitCancel').addEventListener('click', closeExitAsk);
+// 確認の外側を押したときも閉じる
+exitAsk.addEventListener('click', e => { if(e.target === exitAsk) closeExitAsk(); });
+
+// 戻るときにブラウザが勝手にスクロール位置を戻してしまう（一番上に飛ぶ）のを止める。
+// 位置の面倒はこちらで見るので、ブラウザには手を出さないでもらう
+if('scrollRestoration' in history) history.scrollRestoration = 'manual';
+
+// 見えない一段を最初に積んでおく
+pushBackGuard();
+
+/* #SEC_JS_INIT ------------------------------------- */
+document.getElementById('btnPaste').addEventListener('click', pasteFromClipboard);
+document.getElementById('btnPick').addEventListener('click', () => filePick.click());
+document.getElementById('btnTake').addEventListener('click', takeFromBox);
+// 画像のプレビューは、画像そのもの以外のどこを押しても閉じる
+viewer.addEventListener('click', (e) => { if(e.target !== viewerImg) closeViewer(); });
+// 手で打ったときや消したときにも✕と案内文字を合わせ直す
+pasteBox.addEventListener('input', updateBoxEmpty);
+updateBoxEmpty();
+document.getElementById('btnClearBox').addEventListener('click', () => { clearBox(); toast('枠を空にしました'); });
+
+// ---- 絞り込みの帯の✕ ----
+document.getElementById('filterClear').addEventListener('click', clearFilter);
+
+// ---- 検索 ----
+loadSearchHist();
+document.getElementById('btnSearch').addEventListener('click', openSearchModal);
+document.getElementById('smCancel').addEventListener('click', closeSearchModal);
+document.getElementById('smGo').addEventListener('click', () => execSearch(smIn.value));
+document.getElementById('smClear').addEventListener('click', () => { smIn.value = ''; smIn.focus(); });
+// キーボードの確定キー（Enter）でも検索できるようにする
+smIn.addEventListener('keydown', (e) => {
+  if(e.key === 'Enter'){ e.preventDefault(); execSearch(smIn.value); }
+});
+// 暗いところをタップしたら閉じる。中をタップしたときは、出ている削除ボタンだけ引っ込める
+searchModal.addEventListener('click', (e) => {
+  closeHistPopup();
+  if(e.target === searchModal) closeSearchModal();
+});
+
+// ---- 検索モードの専用ヘッダー ----
+document.getElementById('snPrev').addEventListener('click', () => gotoHit(curHit - 1));
+document.getElementById('snNext').addEventListener('click', () => gotoHit(curHit + 1));
+document.getElementById('snClose').addEventListener('click', closeSearchNav);
+// 語句をタップ → モーダルを開いて、別の語句で探し直せる
+document.getElementById('snQuery').addEventListener('click', () => {
+  smIn.value = searchHist.length ? searchHist[searchHist.length - 1] : '';
+  openSearchModal();
+});
+
+// ---- 編集中の覆い。暗いところをタップしたら編集をやめる（戻るボタンと同じ扱い） ----
+document.getElementById('veil').addEventListener('click', tryEndInlineEdit);
+
+// ---- カードの「⋯」メニュー ----
+document.getElementById('menuBackdrop').addEventListener('click', closeCardMenu);
+window.addEventListener('scroll', () => { if(menuCardId !== null) closeCardMenu(); }, { passive:true });
+
+document.getElementById('menuDelete').addEventListener('click', async () => {
+  const id = menuCardId;
+  closeCardMenu();
+  if(id === null) return;
+  // ⋯を開いて削除を選ぶ2段階を踏んでいるので、ここでの確認は出さずにそのまま消す
+  await dbDelete(id);
+  await reload();
+  toast('削除しました');
+});
+
+// ---- 右下の「トップへ戻る」ボタン ----
+const toTopBtn = document.getElementById('toTop');
+
+toTopBtn.addEventListener('click', () => {
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  window.scrollTo({ top:0, behavior: reduce ? 'auto' : 'smooth' });
+});
+
+// 入力欄にカーソルが入ったら隠し、抜けたら戻す
+const INPUTS = 'input, textarea, [contenteditable="true"]';
+document.addEventListener('focusin', e => {
+  if(e.target.closest && e.target.closest(INPUTS)) toTopBtn.classList.add('typing');
+});
+document.addEventListener('focusout', () => {
+  setTimeout(() => {
+    const a = document.activeElement;
+    const stillTyping = !!(a && a.closest && a.closest(INPUTS));
+    toTopBtn.classList.toggle('typing', stillTyping);
+  }, 0);
+});
+
+(async function init(){
+  try{
+    db = await openDB();
+    const got = await drainInbox();
+    await reload();
+    if(got > 0){
+      toast(got === 1 ? '共有からクリップしました' : `共有から${got}件クリップしました`);
+      // アドレスの ?shared=1 を消しておく（再読み込みで二重に反応しないように）
+      if(location.search) history.replaceState({ pegGuard:1 }, '', location.pathname);
+    }
+  }catch(err){
+    console.error(err);
+    listEl.innerHTML = '<div class="empty-state">保存領域を開けませんでした。Chromeで開き直すと動くことがあります。</div>';
+  }
+})();
+
+// Service Worker（共有メニューの受け取り役）。file:// では登録されないが、動作に支障はない
+if('serviceWorker' in navigator && location.protocol.startsWith('http')){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(err => console.error(err));
+  });
+}
+</script>
+</body>
+</html>
