@@ -7,7 +7,7 @@
    ※ sw.js を変更したら VERSION の数字を上げる
    ========================================================== */
 
-const VERSION = 'pegclip-v8';
+const VERSION = 'pegclip-v9';
 const ASSETS  = ['./', './index.html', './manifest.json'];
 
 const DB_NAME = 'pegclip';
@@ -96,8 +96,13 @@ async function handleShare(request){
     }
     if(log.length === 0) log.push('届いた項目なし');
 
+    // 画像が1枚でも届いたときは、一緒に付いてくるURLや文字は入れない（画像だけをクリップする）。
+    // URLも残したくなったら、この if のまとまり（3行）と、次の行頭の else を消せば元の動きに戻る
+    if(n > 0){
+      log.push('画像があるのでURL・文字は入れない');
+    }
     // URLとテキストの両方が来ることがある。URLを優先し、別内容のテキストがあれば分けて入れる
-    if(url){
+    else if(url){
       items.push({ id:newId(), kind:'text', text:url, title:title, createdAt: now + 100 });
       if(text && text !== url && !text.includes(url)){
         items.push({ id:newId(), kind:'text', text:text, title:title, createdAt: now + 101 });
