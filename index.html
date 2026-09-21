@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <!-- キーボードが出たらページの枠ごと縮める（下に浮かせてあるボタンが隠れないようにするため） -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
-<meta name="app-version" content="65">
+<meta name="app-version" content="67">
 <meta name="theme-color" content="#1b1a18">
 <link rel="manifest" href="./manifest.json">
 <link rel="apple-touch-icon" href="./icon-192.png">
@@ -144,6 +144,14 @@ header h1{
 
 /* #SEC_CSS_PASTE ----------------------------------- */
 .pastearea{padding:0 16px;}
+/* 長押し枠の上の説明欄。枠と同じ地の色にそろえ、枠との間を少しあける */
+#purposeIn{
+  display:block;
+  background:var(--panel);
+  font-size:14px;
+  margin-bottom:8px;
+}
+#purposeIn::placeholder{color:var(--dim);}
 /* クリップボタンと、クリップ済みカード一覧の区切り線。左右はカードと同じ位置で止める */
 .sep{height:1px;background:var(--line);margin:18px 16px;}
 .boxwrap{position:relative;}
@@ -668,6 +676,8 @@ header h1{
 </div>
 
 <div class="pastearea">
+  <!-- 説明欄。「クリップ」や「画像」で入れるときに、カードの説明として一緒に保存する -->
+  <input type="text" id="purposeIn" placeholder="説明" aria-label="説明" autocomplete="off">
   <div class="boxwrap">
     <div id="pasteBox" contenteditable="true" data-ph="長押しして貼り付け"></div>
     <button id="btnClearBox" class="boxclear" aria-label="枠を空にする"><svg class="ic"><use href="#ic-x"></use></svg></button>
@@ -1266,25 +1276,27 @@ function newId(){
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
-// 貼った瞬間に保存する。説明はあとから鉛筆ボタンを押して書く
-async function addText(text){
+// カードを保存する。purpose は説明欄の中身（渡されなければ空）。説明はあとから鉛筆ボタンでも書ける
+async function addText(text, purpose = ''){
   const t = text.trim();
   if(!t){ toast('中身が空です'); return; }
-  const card = { id:newId(), type: isUrl(t) ? 'url' : 'text', text:t, purpose:'', createdAt:Date.now() };
+  const card = { id:newId(), type: isUrl(t) ? 'url' : 'text', text:t, purpose:purpose, createdAt:Date.now() };
 
   await dbPut(card);
   await reload();
   toast('クリップしました');
 }
 
-async function addImage(blob){
-  const card = { id:newId(), type:'image', blob:blob, text:'', purpose:'', createdAt:Date.now() };
+async function addImage(blob, purpose = ''){
+  const card = { id:newId(), type:'image', blob:blob, text:'', purpose:purpose, createdAt:Date.now() };
   await dbPut(card);
   await reload();
   toast('クリップしました');
 }
 
 /* #SEC_JS_CLIP ------------------------------------- */
+// 「クリップボード」ボタン。すぐにはカードにせず、長押し枠の末尾に入れる。
+// 中身を確かめたり直したりしてから「クリップ」で保存する（長押しで貼ったときと同じ流れ）
 async function pasteFromClipboard(){
   if(!navigator.clipboard || !navigator.clipboard.read){
     toast('このブラウザはクリップボードの読み取りに対応していません');
@@ -1297,13 +1309,14 @@ async function pasteFromClipboard(){
     const imageType = item.types.find(t => t.startsWith('image/'));
     if(imageType){
       const raw = await item.getType(imageType);
-      const shrunk = await shrinkImage(raw);
-      await addImage(shrunk);
+      appendImageToBox(raw);   // 縮小は「クリップ」を押したときに行う
       return;
     }
     if(item.types.includes('text/plain')){
       const blob = await item.getType('text/plain');
-      await addText(await blob.text());
+      const text = await blob.text();
+      if(!text.trim()){ toast('クリップボードは空です'); return; }
+      appendTextToBox(text);
       return;
     }
     toast('対応していない形式でした');
@@ -1335,6 +1348,7 @@ async function copyCard(card){
 /* #SEC_JS_PASTE ------------------------------------ */
 // こちらは clipboard-read の権限を使わないので file:// でも動く
 const pasteBox = document.getElementById('pasteBox');
+const purposeIn = document.getElementById('purposeIn');   // 枠の上の説明欄
 
 // 貼り付けた時点ではカードにしない。枠の中に足していき、「クリップ」を押して初めて保存する
 pasteBox.addEventListener('paste', (e) => {
@@ -1401,21 +1415,25 @@ function updateBoxEmpty(){
   pasteBox.classList.toggle('is-empty', !hasImage && !hasText);
 }
 
-// 貼り付けイベントが取れなかった場合の受け皿
+// 「クリップ」ボタン。枠の中身と説明欄の中身を一緒に1枚のカードにする
+// 枠が空のときは説明欄を消さずに残す（書いた説明が無駄にならないように）
 async function takeFromBox(){
+  const purpose = purposeIn.value.trim();
   const img = pasteBox.querySelector('img');
   if(img){
     const blob = await imgToBlob(img);
     if(!blob){ toast('画像を取り込めませんでした'); return; }
     const shrunk = await shrinkImage(blob);
     clearBox();
-    await addImage(shrunk);
+    purposeIn.value = '';
+    await addImage(shrunk, purpose);
     return;
   }
   const text = pasteBox.innerText;
   if(text && text.trim()){
     clearBox();
-    await addText(text);
+    purposeIn.value = '';
+    await addText(text, purpose);
     return;
   }
   toast('枠が空です');
@@ -1458,6 +1476,8 @@ filePick.addEventListener('change', async () => {
   filePick.value = '';   // 同じ画像をもう一度選んでも反応するように空にしておく
   if(files.length === 0) return;
 
+  // 説明欄に書いてあれば、選んだ画像すべてに同じ説明を付ける
+  const purpose = purposeIn.value.trim();
   let ok = 0, ng = 0;
   const base = Date.now();
   for(let i = 0; i < files.length; i++){
@@ -1467,13 +1487,15 @@ filePick.addEventListener('change', async () => {
       bitmap.close();
       const shrunk = await shrinkImage(files[i]);
       await dbPut({ id:newId(), type:'image', blob:shrunk, text:'',
-                    purpose:'', createdAt: base + i });
+                    purpose:purpose, createdAt: base + i });
       ok++;
     }catch(err){
       console.error(err);
       ng++;
     }
   }
+  // 1枚でも入ったら説明欄を空にする。全部だめだったときは書いた説明を残す
+  if(ok > 0) purposeIn.value = '';
   await reload();
   if(ng === 0)      toast(ok === 1 ? 'クリップしました' : `${ok}件クリップしました`);
   else if(ok === 0) toast('画像を開けませんでした');
