@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <!-- キーボードが出たらページの枠ごと縮める（下に浮かせてあるボタンが隠れないようにするため） -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
-<meta name="app-version" content="67">
+<meta name="app-version" content="68">
 <meta name="theme-color" content="#1b1a18">
 <link rel="manifest" href="./manifest.json">
 <link rel="apple-touch-icon" href="./icon-192.png">
@@ -1924,7 +1924,10 @@ function handleBack(){
   // 6. 検索モード中 → 検索をやめる
   if(isSearchNavOpen()){ closeSearchNav(); return; }
 
-  // 7. 何も開いていない → 終了の確認
+  // 7. タグで絞り込み中 → 絞り込みを解除する（帯の✕を押したのと同じ）
+  if(filterCat){ clearFilter(); return; }
+
+  // 8. 何も開いていない → 終了の確認
   openExitAsk();
 }
 
