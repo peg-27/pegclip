@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <!-- キーボードが出たらページの枠ごと縮める（下に浮かせてあるボタンが隠れないようにするため） -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
-<meta name="app-version" content="68">
+<meta name="app-version" content="70">
 <meta name="theme-color" content="#1b1a18">
 <link rel="manifest" href="./manifest.json">
 <link rel="apple-touch-icon" href="./icon-192.png">
@@ -26,11 +26,11 @@
   #SEC_HTML        画面の構造
   #SEC_JS_DB       IndexedDB（開く・保存・読む・消す）
   #SEC_JS_STATE    メモリ上のカード配列と再描画
-  #SEC_JS_ADD      カードを足す（テキスト／画像／メモ）
+  #SEC_JS_ADD      カードを足す（文字と画像をまとめて1枚に）・画像の持ち方をそろえる
   #SEC_JS_CLIP     クリップボードの読み取り・書き込み
   #SEC_JS_PASTE    貼り付け枠（権限が要らない入り口）
-  #SEC_JS_PICK     画像を選んで入れる（共有が使えないときの入り口）
-  #SEC_JS_VIEW     画像のプレビューの開閉
+  #SEC_JS_PICK     画像を選んで入れる（貼り付け枠へ／編集中のカードへ）
+  #SEC_JS_VIEW     画像のプレビューの開閉と、その画像のコピー
   #SEC_JS_SEARCH   検索（モーダル・履歴・ヒット判定）
   #SEC_JS_UTIL     URL判定・画像縮小・日付・トースト
   #SEC_JS_INBOX    共有メニューから届いたものを取り込む
@@ -288,7 +288,41 @@ header h1{
 .edit-area textarea,
 .edit-area input[type="text"]{margin-bottom:12px;}
 .edit-area textarea{resize:vertical;font-size:14px;line-height:1.6;}
-.edit-area img{display:block;max-width:100%;max-height:160px;border-radius:8px;margin-bottom:12px;}
+/* 編集中も画像は見るだけ。並べ方は通常のカードと同じ */
+.edit-area .thumbs{margin-bottom:12px;}
+.edit-area .thumbs img{cursor:default;}
+/* 編集中の画像1枚ぶんの枠。右上に「外す」✕を重ねる */
+.edit-area .tcell{position:relative;}
+.edit-area .tdel{
+  position:absolute;top:5px;right:5px;
+  width:28px;height:28px;padding:0;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.65);
+  border:1px solid var(--line);
+  border-radius:50%;
+  color:var(--text);
+}
+.edit-area .tdel .ic{width:14px;height:14px;}
+/* 画像の並びの最後に置く「追加」。3枚そろったら出さない */
+.edit-area .tadd{
+  aspect-ratio:1/1;
+  padding:0;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+  border:1px dashed var(--line);
+  border-radius:8px;
+  color:var(--dim);
+  font-size:11px;
+}
+.edit-area .tadd .ic{color:var(--tag);width:20px;height:20px;stroke-width:1.3;}
+/* 画像が1枚もないカードで出す「画像を追加」。正方形だと場所を取るので、細い帯のボタンにしてある */
+.edit-area .addimg{
+  display:flex;align-items:center;gap:7px;
+  margin-bottom:12px;
+  padding:7px 12px;
+  font-size:13px;
+  color:var(--dim);
+}
+.edit-area .addimg .ic{color:var(--tag);width:18px;height:18px;stroke-width:1.3;}
 .actions .ok{background:var(--tag);border-color:var(--tag);color:#211d16;font-weight:600;margin-left:auto;min-width:88px;}
 .actions .cancel{min-width:88px;}
 /* 共有メニューから受け取ったページタイトル。無いカードには出ない */
@@ -317,13 +351,21 @@ header h1{
   color:var(--text);
 }
 .body pre.open{max-height:none;}
-.body img{
+/* カードの画像。1枚のカードに3枚まで入る */
+.thumbs img{
   display:block;
-  max-width:100%;
-  max-height:220px;
   border-radius:8px;
   background:#000;
+  cursor:pointer;
 }
+/* 画像1枚だけで、URLでもないカード。今までどおり大きく出す */
+.thumbs.single img{max-width:100%;max-height:220px;}
+/* 2〜3枚のとき、またはURLのサムネイルのときは、小さい正方形を横に並べる。
+   列は常に3つぶん取ってあるので、1枚でも2枚でも正方形の大きさは変わらない */
+.thumbs.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+.thumbs.grid img{width:100%;aspect-ratio:1/1;object-fit:cover;}
+/* 画像の下に文字があるときの間隔 */
+.thumbs + pre{margin-top:10px;}
 .meta{
   padding:0 14px 8px;
   font-size:11px;
@@ -412,6 +454,21 @@ header h1{
   color:var(--text);
 }
 .viewer-close .ic{width:18px;height:18px;}
+/* 全画面表示の下に出す「この画像をコピー」。画像が複数あるカードでも、見ている1枚だけをコピーできる */
+.viewer-copy{
+  position:absolute;
+  bottom:calc(18px + env(safe-area-inset-bottom));left:50%;
+  transform:translateX(-50%);
+  display:flex;align-items:center;gap:7px;
+  padding:10px 18px;
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:999px;
+  color:var(--text);
+  font-size:13px;
+  white-space:nowrap;
+}
+.viewer-copy .ic{width:18px;height:18px;stroke-width:1.3;}
 
 /* 検索モードの専用ヘッダー。画面の一番上に貼り付けておく。
    一覧をどれだけスクロールしても↑↓が届くように、ここだけは固定にしてある。
@@ -673,6 +730,8 @@ header h1{
   <button id="btnPaste"><svg class="ic"><use href="#ic-clipboard"></use></svg>クリップボード</button>
   <button id="btnPick"><svg class="ic"><use href="#ic-photo"></use></svg>画像</button>
   <input type="file" id="filePick" accept="image/*" multiple hidden>
+  <!-- 編集中のカードに画像を足すときの選択。ボタンは編集中のカードの中にある -->
+  <input type="file" id="editPick" accept="image/*" multiple hidden>
 </div>
 
 <div class="pastearea">
@@ -691,6 +750,7 @@ header h1{
 <div id="viewer" class="viewer">
   <button id="viewerClose" class="viewer-close" aria-label="閉じる"><svg class="ic"><use href="#ic-x"></use></svg></button>
   <img id="viewerImg" alt="拡大した画像">
+  <button id="viewerCopy" class="viewer-copy"><svg class="ic"><use href="#ic-copy"></use></svg>この画像をコピー</button>
 </div>
 
 <div class="sep"></div>
@@ -818,7 +878,7 @@ const listEl = document.getElementById('list');
 let filterCat = null;           // 絞り込み中のカテゴリ名。null なら全部出す
 
 async function reload(){
-  cards = await dbGetAll();
+  cards = (await dbGetAll()).map(normalizeCard);
   cards.sort((a,b) => b.createdAt - a.createdAt);
   render();
 }
@@ -887,7 +947,7 @@ function replaceCardEl(id){
 }
 
 let inlineEditId = null;   // カードの中で編集中のカードのid（同時に1枚だけ）
-let inlineDraft  = null;   // 書きかけの内容 { text, purpose }。画面を描き直しても消えないようにここに持つ
+let inlineDraft  = null;   // 書きかけの内容 { text, purpose, images }。画面を描き直しても消えないようにここに持つ
 
 function buildCard(card){
   if(card.id === inlineEditId) return buildEditCard(card);
@@ -925,15 +985,13 @@ function buildCard(card){
   }
 
   // 中身
+  // 画像が先、その下に文字。どちらか片方しかないカードもある
   const body = document.createElement('div');
   body.className = 'body';
-  if(card.type === 'image'){
-    const img = document.createElement('img');
-    img.alt = '保存した画像';
-    img.src = URL.createObjectURL(card.blob);
-    img.addEventListener('click', () => openViewer(img.src));
-    body.appendChild(img);
-  } else {
+  if(card.images.length){
+    body.appendChild(buildThumbs(card, true));
+  }
+  if(card.text){
     const pre = document.createElement('pre');
     setTextWithHits(pre, card.text);
     pre.addEventListener('click', () => pre.classList.toggle('open'));
@@ -986,6 +1044,22 @@ function buildCard(card){
 
   el.appendChild(actions);
   return el;
+}
+
+// カードの画像の並び。tappable が true なら、タップで全画面表示を開く（編集中は開かない）
+function buildThumbs(card, tappable){
+  const wrap = document.createElement('div');
+  // 1枚だけで、URLでもないときは大きく。それ以外は小さい正方形を並べる
+  const single = card.images.length === 1 && card.type !== 'url';
+  wrap.className = 'thumbs ' + (single ? 'single' : 'grid');
+  card.images.forEach((blob, i) => {
+    const img = document.createElement('img');
+    img.alt = '保存した画像 ' + (i + 1);
+    img.src = URL.createObjectURL(blob);
+    if(tappable) img.addEventListener('click', () => openViewer(img.src, blob));
+    wrap.appendChild(img);
+  });
+  return wrap;
 }
 
 // カードの「⋯」メニュー。押したボタンのすぐ近くに浮かせる
@@ -1057,23 +1131,16 @@ function buildEditCard(card){
   const area = document.createElement('div');
   area.className = 'edit-area';
 
-  // 内容
-  let textEl = null;
-  if(card.type === 'image'){
-    // 画像そのものは編集できないので、見るだけ
-    const img = document.createElement('img');
-    img.alt = '保存した画像';
-    img.src = URL.createObjectURL(card.blob);
-    area.appendChild(img);
-  } else {
-    textEl = document.createElement('textarea');
-    textEl.setAttribute('aria-label', '内容');
-    textEl.value = inlineDraft.text;
-    textEl.addEventListener('input', () => { inlineDraft.text = textEl.value; });
-    const lines = inlineDraft.text.split('\n').length;
-    textEl.rows = Math.min(12, Math.max(3, lines + 1));
-    area.appendChild(textEl);
-  }
+  // 内容。画像は付け外しができる（OKを押すまでは書きかけの中だけで変わる）。文字はどのカードでも書ける
+  area.appendChild(buildEditImages());
+  const textEl = document.createElement('textarea');
+  textEl.setAttribute('aria-label', '内容');
+  if(inlineDraft.images.length) textEl.placeholder = '画像に添える文字（なくてもよい）';
+  textEl.value = inlineDraft.text;
+  textEl.addEventListener('input', () => { inlineDraft.text = textEl.value; });
+  const lines = inlineDraft.text.split('\n').length;
+  textEl.rows = Math.min(12, Math.max(3, lines + 1));
+  area.appendChild(textEl);
   el.appendChild(area);
 
   // 日付など（通常カードと同じ内容・同じ位置。日時は作成したときのもの）
@@ -1099,12 +1166,12 @@ function buildEditCard(card){
   ok.className = 'ok';
   ok.textContent = 'OK';
   ok.addEventListener('click', async () => {
-    if(textEl){
-      const t = textEl.value.trim();
-      if(!t){ toast('内容が空です'); return; }
-      card.text = t;
-      card.type = isUrl(t) ? 'url' : 'text';   // 書き換えでURLになった／URLでなくなった場合に合わせる
-    }
+    const t = textEl.value.trim();
+    // 画像があるカードは文字が空でもよい。画像も文字もないカードにはしない
+    if(!t && inlineDraft.images.length === 0){ toast('画像も文字も空です'); return; }
+    card.text = t;
+    card.images = inlineDraft.images.slice();
+    card.type = typeOf(t, card.images);   // 書き換えでURLになった／URLでなくなった場合に合わせる
     card.purpose = purposeEl.value.trim();
     await dbPut(card);
     endInlineEdit();
@@ -1121,6 +1188,61 @@ function buildEditCard(card){
   return el;
 }
 
+// 編集中のカードの画像の並び。書きかけ（inlineDraft.images）を元に作る。
+// 画像が1枚もないときは「画像を追加」の細いボタンだけを出す
+function buildEditImages(){
+  const imgs = inlineDraft.images;
+  if(imgs.length === 0){
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'addimg';
+    add.innerHTML = '<svg class="ic"><use href="#ic-photo"></use></svg>画像を追加';
+    add.addEventListener('click', () => editPick.click());
+    return add;
+  }
+
+  const wrap = document.createElement('div');
+  wrap.className = 'thumbs grid';
+  imgs.forEach((blob, i) => {
+    const cell = document.createElement('div');
+    cell.className = 'tcell';
+    const img = document.createElement('img');
+    img.alt = '画像 ' + (i + 1);
+    img.src = URL.createObjectURL(blob);
+    cell.appendChild(img);
+
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'tdel';
+    del.innerHTML = '<svg class="ic"><use href="#ic-x"></use></svg>';
+    del.setAttribute('aria-label', (i + 1) + '枚目の画像を外す');
+    del.addEventListener('click', () => {
+      inlineDraft.images.splice(i, 1);
+      refreshEditCard();
+    });
+    cell.appendChild(del);
+    wrap.appendChild(cell);
+  });
+
+  if(imgs.length < MAX_IMAGES){
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'tadd';
+    add.innerHTML = '<svg class="ic"><use href="#ic-photo"></use></svg>追加';
+    add.setAttribute('aria-label', '画像を追加');
+    add.addEventListener('click', () => editPick.click());
+    wrap.appendChild(add);
+  }
+  return wrap;
+}
+
+// 画像を足したり外したりしたあと、編集中のカードを作り直す。
+// 書きかけの文字と説明は inlineDraft に入っているので消えない
+function refreshEditCard(){
+  if(inlineEditId === null) return;
+  replaceCardEl(inlineEditId);
+}
+
 // 編集を始める。focusTo は最初に移る欄（'text' か 'purpose'）
 function startInlineEdit(id, focusTo){
   if(inlineEditId === id) return;   // すでに編集中のカードなら何もしない
@@ -1135,7 +1257,7 @@ function startInlineEdit(id, focusTo){
   // 前に編集していたカードがあれば、通常の形に戻す
   const prevId = inlineEditId;
   inlineEditId = id;
-  inlineDraft  = { text: card.text || '', purpose: card.purpose || '' };
+  inlineDraft  = { text: card.text || '', purpose: card.purpose || '', images: card.images.slice() };
   showVeil(true);
   if(prevId !== null) replaceCardEl(prevId);
 
@@ -1144,7 +1266,9 @@ function startInlineEdit(id, focusTo){
   if(!el) { render(); return; }
 
   // カーソルを移す。preventScroll で、ブラウザによる余計なスクロールを止める
-  const target = (focusTo === 'purpose' || !el._textEl) ? el._purposeEl : el._textEl;
+  // 文字のない画像カードは、今までどおり説明欄から書き始める
+  const imageOnly = card.images.length > 0 && !card.text;
+  const target = (focusTo === 'purpose' || imageOnly) ? el._purposeEl : el._textEl;
   target.focus({ preventScroll: true });
 
   scrollCardToTop(el);
@@ -1246,7 +1370,15 @@ window.addEventListener('scroll', trimSpacer, { passive:true });
 function isDraftChanged(){
   const card = cards.find(c => c.id === inlineEditId);
   if(!card || !inlineDraft) return false;
-  return inlineDraft.text !== (card.text || '') || inlineDraft.purpose !== (card.purpose || '');
+  return inlineDraft.text !== (card.text || '')
+      || inlineDraft.purpose !== (card.purpose || '')
+      || !sameImages(inlineDraft.images, card.images);
+}
+
+// 画像の並びが同じかどうか（同じ画像が同じ順に並んでいるか）
+function sameImages(a, b){
+  if(a.length !== b.length) return false;
+  return a.every((blob, i) => blob === b[i]);
 }
 
 // メタ行の左側。種類の文字はカテゴリタグに移したので、URLのドメインだけを出す
@@ -1276,22 +1408,40 @@ function newId(){
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
-// カードを保存する。purpose は説明欄の中身（渡されなければ空）。説明はあとから鉛筆ボタンでも書ける
-async function addText(text, purpose = ''){
-  const t = text.trim();
-  if(!t){ toast('中身が空です'); return; }
-  const card = { id:newId(), type: isUrl(t) ? 'url' : 'text', text:t, purpose:purpose, createdAt:Date.now() };
+// 1枚のカードに付けられる画像の数
+const MAX_IMAGES = 3;
 
-  await dbPut(card);
-  await reload();
-  toast('クリップしました');
+// カードの種類。文字がURLだけなら「URL」、そうでなく画像があれば「画像」、どちらもなければ「テキスト」
+function typeOf(text, images){
+  if(isUrl(text || '')) return 'url';
+  if(images && images.length) return 'image';
+  return 'text';
 }
 
-async function addImage(blob, purpose = ''){
-  const card = { id:newId(), type:'image', blob:blob, text:'', purpose:purpose, createdAt:Date.now() };
+// 画像の持ち方を配列（images）にそろえる。
+// v68までの画像カードは blob に1枚だけ入っているので、読み込んだときに1枚入りの配列に置き換える。
+// データベースの中身はそのままで、次にそのカードを保存したときに新しい形で書き込まれる
+function normalizeCard(card){
+  if(!Array.isArray(card.images)){
+    card.images = card.blob ? [card.blob] : [];
+  }
+  delete card.blob;
+  if(typeof card.text !== 'string') card.text = '';
+  card.type = typeOf(card.text, card.images);
+  return card;
+}
+
+// カードを1枚保存する。文字と画像はどちらか片方だけでも、両方でもよい。
+// images は縮小済みの画像の配列（0〜3枚）。purpose は説明欄の中身。
+// note を渡すと、保存後のお知らせをその文に差し替える
+async function addCard(text, images, purpose = '', note = ''){
+  const t = (text || '').trim();
+  if(!t && images.length === 0){ toast('中身が空です'); return; }
+  const card = { id:newId(), type:typeOf(t, images), text:t, images:images,
+                 purpose:purpose, createdAt:Date.now() };
   await dbPut(card);
   await reload();
-  toast('クリップしました');
+  toast(note || 'クリップしました');
 }
 
 /* #SEC_JS_CLIP ------------------------------------- */
@@ -1326,19 +1476,31 @@ async function pasteFromClipboard(){
   }
 }
 
+// カードのコピーボタン。文字があれば文字を、文字のない画像カードなら1枚目の画像をコピーする。
+// 2枚目以降の画像は、全画面表示の「この画像をコピー」からコピーする
 async function copyCard(card){
+  if(card.text) await copyText(card.text);
+  else if(card.images.length) await copyImage(card.images[0]);
+}
+
+// コピーできたときのお知らせは出さない。
+// Android側が「コピーしました」を自前で出すので、このアプリでも出すと二重になるため。
+// 元に戻したくなったら、下の2つの関数の await の次の行に toast('コピーしました') を足せばよい
+async function copyText(text){
   try{
-    if(card.type === 'image'){
-      if(!navigator.clipboard || !window.ClipboardItem){
-        toast('このブラウザは画像のコピーに対応していません'); return;
-      }
-      await navigator.clipboard.write([ new ClipboardItem({ 'image/png': card.blob }) ]);
-    } else {
-      await navigator.clipboard.writeText(card.text);
-    }
-    // コピーできたときのお知らせは出さない。
-    // Android側が「コピーしました」を自前で出すので、このアプリでも出すと二重になるため。
-    // 元に戻したくなったら、上の2か所に toast('コピーしました') を足せばよい
+    await navigator.clipboard.writeText(text);
+  }catch(err){
+    toast('コピーできませんでした');
+    console.error(err);
+  }
+}
+
+async function copyImage(blob){
+  if(!navigator.clipboard || !window.ClipboardItem){
+    toast('このブラウザは画像のコピーに対応していません'); return;
+  }
+  try{
+    await navigator.clipboard.write([ new ClipboardItem({ 'image/png': blob }) ]);
   }catch(err){
     toast('コピーできませんでした');
     console.error(err);
@@ -1415,28 +1577,35 @@ function updateBoxEmpty(){
   pasteBox.classList.toggle('is-empty', !hasImage && !hasText);
 }
 
-// 「クリップ」ボタン。枠の中身と説明欄の中身を一緒に1枚のカードにする
+// 「クリップ」ボタン。枠の中の画像と文字、それに説明欄の中身を、まとめて1枚のカードにする。
+// 画像は枠に入っている順に3枚まで。4枚目からは取り込まない
 // 枠が空のときは説明欄を消さずに残す（書いた説明が無駄にならないように）
 async function takeFromBox(){
   const purpose = purposeIn.value.trim();
-  const img = pasteBox.querySelector('img');
-  if(img){
+  const imgEls = Array.from(pasteBox.querySelectorAll('img'));
+  const text = boxText();
+  if(imgEls.length === 0 && !text){ toast('枠が空です'); return; }
+
+  const images = [];
+  for(const img of imgEls.slice(0, MAX_IMAGES)){
     const blob = await imgToBlob(img);
+    // 1枚でも取り出せなかったら保存しない。枠と説明欄はそのまま残るので、やり直せる
     if(!blob){ toast('画像を取り込めませんでした'); return; }
-    const shrunk = await shrinkImage(blob);
-    clearBox();
-    purposeIn.value = '';
-    await addImage(shrunk, purpose);
-    return;
+    images.push(await shrinkImage(blob));
   }
-  const text = pasteBox.innerText;
-  if(text && text.trim()){
-    clearBox();
-    purposeIn.value = '';
-    await addText(text, purpose);
-    return;
-  }
-  toast('枠が空です');
+  clearBox();
+  purposeIn.value = '';
+  const note = imgEls.length > MAX_IMAGES ? `画像は${MAX_IMAGES}枚まで取り込みました` : '';
+  await addCard(text, images, purpose, note);
+}
+
+// 枠の中の文字だけを取り出す。
+// 画像の前後に入る改行が空行として残るので、続く空行は1つにまとめる
+function boxText(){
+  return pasteBox.innerText
+    .replace(/\u00a0/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 // 枠に貼られた img から実データを取り出す（fetchが通らない環境ではcanvasで写し取る）
@@ -1468,7 +1637,9 @@ function clearBox(){
 }
 
 /* #SEC_JS_PICK ------------------------------------- */
-// 端末の画像を選んで入れる。複数選択できる
+// 端末の画像を選んで、貼り付け枠に入れる。すぐにはカードにしない。
+// 「クリップボード」ボタンと同じく、文字を添えたりしてから「クリップ」で保存する。
+// 複数選べるが、1枚のカードに入るのは3枚まで（4枚目からは「クリップ」のときに外れる）
 const filePick = document.getElementById('filePick');
 
 filePick.addEventListener('change', async () => {
@@ -1476,45 +1647,66 @@ filePick.addEventListener('change', async () => {
   filePick.value = '';   // 同じ画像をもう一度選んでも反応するように空にしておく
   if(files.length === 0) return;
 
-  // 説明欄に書いてあれば、選んだ画像すべてに同じ説明を付ける
-  const purpose = purposeIn.value.trim();
-  let ok = 0, ng = 0;
-  const base = Date.now();
-  for(let i = 0; i < files.length; i++){
+  let ng = 0;
+  for(const file of files){
     try{
-      // 開けない画像（ブラウザが対応していない形式など）は入れない
-      const bitmap = await createImageBitmap(files[i]);
+      // 開けない画像（ブラウザが対応していない形式など）は枠に入れない
+      const bitmap = await createImageBitmap(file);
       bitmap.close();
-      const shrunk = await shrinkImage(files[i]);
-      await dbPut({ id:newId(), type:'image', blob:shrunk, text:'',
-                    purpose:purpose, createdAt: base + i });
-      ok++;
+      appendImageToBox(file);   // 縮小は「クリップ」を押したときに行う
     }catch(err){
       console.error(err);
       ng++;
     }
   }
-  // 1枚でも入ったら説明欄を空にする。全部だめだったときは書いた説明を残す
-  if(ok > 0) purposeIn.value = '';
-  await reload();
-  if(ng === 0)      toast(ok === 1 ? 'クリップしました' : `${ok}件クリップしました`);
-  else if(ok === 0) toast('画像を開けませんでした');
-  else              toast(`${ok}件クリップしました（${ng}件は開けませんでした）`);
+  if(ng === files.length) toast('画像を開けませんでした');
+  else if(ng > 0)         toast(`${ng}件は開けませんでした`);
+});
+
+// 編集中のカードに画像を足す。足せるのは3枚になるまで。
+// 足した時点では書きかけに入るだけで、OKを押すまで保存はされない
+const editPick = document.getElementById('editPick');
+
+editPick.addEventListener('change', async () => {
+  const files = Array.from(editPick.files || []);
+  editPick.value = '';   // 同じ画像をもう一度選んでも反応するように空にしておく
+  if(files.length === 0 || !inlineDraft) return;
+
+  let ng = 0, over = 0;
+  for(const file of files){
+    if(inlineDraft.images.length >= MAX_IMAGES){ over++; continue; }
+    try{
+      // 開けない画像（ブラウザが対応していない形式など）は足さない
+      const bitmap = await createImageBitmap(file);
+      bitmap.close();
+      inlineDraft.images.push(await shrinkImage(file));
+    }catch(err){
+      console.error(err);
+      ng++;
+    }
+  }
+  refreshEditCard();
+  if(over > 0)      toast(`画像は${MAX_IMAGES}枚までです`);
+  else if(ng > 0)   toast(ng === files.length ? '画像を開けませんでした' : `${ng}件は開けませんでした`);
 });
 
 /* #SEC_JS_VIEW ------------------------------------- */
 const viewer    = document.getElementById('viewer');
 const viewerImg = document.getElementById('viewerImg');
 
+let viewerBlob = null;   // いま全画面で見ている画像の実データ。「この画像をコピー」で使う
+
 // カードの画像と同じ置き場を使い回すだけなので、閉じるときに解放はしない
-function openViewer(src){
+function openViewer(src, blob){
   viewerImg.src = src;
+  viewerBlob = blob;
   viewer.classList.add('on');
 }
 
 function closeViewer(){
   viewer.classList.remove('on');
   viewerImg.removeAttribute('src');
+  viewerBlob = null;
 }
 
 /* #SEC_JS_SEARCH ----------------------------------- */
@@ -1654,7 +1846,7 @@ function closeSearchModal(){
 }
 
 // ---- カード1枚が検索語句を含んでいるか ----
-// 見るのは 説明・タイトル・本文の3つ。画像カードは本文が空なので、説明とタイトルで探すことになる
+// 見るのは 説明・タイトル・本文の3つ。文字のない画像カードは、説明とタイトルで探すことになる
 function cardMatches(card, lowered){
   const parts = [card.purpose || '', card.title || '', card.text || ''];
   return parts.join('\n').toLowerCase().includes(lowered);
@@ -1856,7 +2048,7 @@ async function drainInbox(){
     try{
       if(item.kind === 'image'){
         const blob = await shrinkImage(item.blob);
-        await dbPut({ id:newId(), type:'image', blob:blob, text:'',
+        await dbPut({ id:newId(), type:'image', images:[blob], text:'',
                       title:item.title || '', purpose:'', createdAt:item.createdAt });
       } else {
         const t = (item.text || '').trim();
@@ -1963,8 +2155,15 @@ pushBackGuard();
 document.getElementById('btnPaste').addEventListener('click', pasteFromClipboard);
 document.getElementById('btnPick').addEventListener('click', () => filePick.click());
 document.getElementById('btnTake').addEventListener('click', takeFromBox);
-// 画像のプレビューは、画像そのもの以外のどこを押しても閉じる
-viewer.addEventListener('click', (e) => { if(e.target !== viewerImg) closeViewer(); });
+// 画像のプレビューは、画像そのものと「この画像をコピー」以外のどこを押しても閉じる
+viewer.addEventListener('click', (e) => {
+  if(e.target === viewerImg || e.target.closest('#viewerCopy')) return;
+  closeViewer();
+});
+// 見ている1枚だけをコピーする。コピーしたあとも表示は開いたまま
+document.getElementById('viewerCopy').addEventListener('click', () => {
+  if(viewerBlob) copyImage(viewerBlob);
+});
 // 手で打ったときや消したときにも✕と案内文字を合わせ直す
 pasteBox.addEventListener('input', updateBoxEmpty);
 updateBoxEmpty();

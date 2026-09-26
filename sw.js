@@ -7,7 +7,7 @@
    ※ sw.js を変更したら VERSION の数字を上げる
    ========================================================== */
 
-const VERSION = 'pegclip-v9';
+const VERSION = 'pegclip-v9.1.0';
 const ASSETS  = ['./', './index.html', './manifest.json'];
 
 const DB_NAME = 'pegclip';
